@@ -387,8 +387,8 @@ const TimelineView: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex gap-4 flex-1 min-h-0">
-        <div className="relative flex-1 bg-white/80 border border-white/60 rounded-[28px] shadow-[var(--shadow-card)] overflow-hidden">
+      <div className="flex flex-col xl:flex-row gap-4 flex-1 min-h-0">
+        <div className="relative flex-1 min-h-[360px] bg-white/80 border border-white/60 rounded-[28px] shadow-[var(--shadow-card)] overflow-hidden">
           {/* Floating 'Back to focus' button */}
           <button 
             onClick={() => scrollToRelevantTimeRef.current(true)}
@@ -512,7 +512,7 @@ const TimelineView: React.FC = () => {
           </div>
         </div>
 
-        <div className="w-80 shrink-0 space-y-4 overflow-y-auto pr-1">
+        <div className="w-full xl:w-80 xl:shrink-0 space-y-4 overflow-y-auto pr-1">
           <div className="rounded-2xl border border-white/60 bg-white/80 shadow-[var(--shadow-soft)] p-4 space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">快速新建</h3>

@@ -239,14 +239,14 @@ function App() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col overflow-hidden relative">
+      <main className="flex-1 min-w-0 flex flex-col overflow-hidden relative">
         <header className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between shrink-0">
           <div className="space-y-2">
             <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Today Focus</p>
             <h2 className="text-3xl font-bold text-slate-800">{menuItems.find(i => i.id === activeTab)?.label}</h2>
             <p className="text-slate-500">{format(new Date(), 'yyyy年MM月dd日 EEEE')}</p>
           </div>
-          <div className="grid grid-cols-3 gap-3 w-full lg:w-auto">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 w-full lg:w-auto">
             <div className="bg-white/80 border border-white/60 rounded-2xl p-4 shadow-[var(--shadow-soft)] backdrop-blur-xl">
               <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-slate-400">
                 <ListTodo size={14} /> 今日任务
