@@ -9,9 +9,9 @@
     "dev": "node scripts/dev-electron.mjs",
     "dev:ui": "vite",
     "dev:web": "vite",
-    "build": "tsc && vite build && electron-builder",
-    "build:win": "tsc && vite build && electron-builder --win",
-    "build:mac": "tsc && vite build && electron-builder --mac",
+    "build": "tsc && vite build && electron-builder --publish=never",
+    "build:win": "tsc && vite build && electron-builder --win --publish=never",
+    "build:mac": "tsc && vite build && electron-builder --mac --publish=never",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview"
   },
