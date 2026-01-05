@@ -1,0 +1,92 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=ZCOOL+XiaoWei&display=swap');
+
+@theme {
+  --color-primary: #0f766e;
+  --color-primary-dark: #115e59;
+  --color-secondary: #f97316;
+  --color-secondary-dark: #ea580c;
+  --color-background: #f6f2ec;
+  --color-ink: #0f172a;
+  --color-surface: #ffffff;
+  --color-surface-muted: #fdfaf5;
+  --color-glass: rgba(255, 255, 255, 0.7);
+  --shadow-soft: 0 24px 60px -40px rgba(15, 23, 42, 0.4);
+  --shadow-card: 0 18px 40px -30px rgba(15, 23, 42, 0.35);
+}
+
+@layer base {
+  :root {
+    --app-bg: radial-gradient(1200px 600px at 10% -10%, rgba(15, 118, 110, 0.18), transparent 60%),
+      radial-gradient(1200px 700px at 90% 10%, rgba(249, 115, 22, 0.18), transparent 65%),
+      linear-gradient(135deg, #f7f2ea 0%, #f2f6f8 50%, #f4fbfb 100%);
+  }
+
+  html, body {
+    /* 移除所有可能导致 IME 问题的特殊属性 */
+    -webkit-user-select: auto;
+    user-select: auto;
+    background: var(--app-bg);
+    color: var(--color-ink);
+  }
+
+  input, textarea, [contenteditable="true"] {
+    /* 强制启用文本选择和输入法 */
+    -webkit-user-select: text !important;
+    user-select: text !important;
+    /* 绝对不能有 drag 属性 */
+    -webkit-app-region: no-drag !important;
+  }
+}
+
+/* 核心布局，确保不会由于容器问题截断输入法 */
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Manrope", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+h1, h2, h3, h4 {
+  font-family: "ZCOOL XiaoWei", "Noto Serif SC", "STSong", serif;
+}
+
+/* 暂时禁用所有自定义滚动条样式，以防万一 */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.timeline-container {
+  /* 仅在时间轴内部禁止选择，防止拖拽任务时选中文字 */
+  user-select: none;
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+@keyframes floatPulse {
+  0%, 100% {
+    transform: translateY(0px) scale(1);
+  }
+  50% {
+    transform: translateY(-12px) scale(1.02);
+  }
+}
+
+@keyframes fadeRise {
+  0% {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0px);
+  }
+}
