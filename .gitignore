@@ -13,6 +13,7 @@ dist-electron
 dist-ssr
 *.local
 release
+GEMINI.md
 
 # Editor directories and files
 .vscode/*
