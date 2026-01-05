@@ -25,11 +25,13 @@ import DailyPlanner from './components/DailyPlanner';
 import TimelineView from './components/TimelineView';
 import QuarterlyGoals from './components/QuarterlyGoals';
 import PomodoroTimer from './components/PomodoroTimer';
+import PomodoroFloatingBall from './components/PomodoroFloatingBall';
 import AIAssistant from './components/AIAssistant';
 import WeeklyPlan from './components/WeeklyPlan';
 import Settings from './components/Settings';
 import HabitTracker from './components/HabitTracker';
 import WeeklyReport from './components/WeeklyReport';
+import { PomodoroProvider } from './contexts/PomodoroContext';
 
 type AppNotification = {
   title: string;
@@ -199,157 +201,160 @@ function App() {
   };
 
   return (
-    <div className="relative flex h-screen w-screen overflow-hidden text-slate-900">
-      <div className="pointer-events-none absolute inset-0">
-        <div className="absolute -top-20 -right-10 h-72 w-72 rounded-full bg-primary/20 blur-3xl animate-[floatPulse_14s_ease-in-out_infinite]" />
-        <div className="absolute bottom-10 left-6 h-80 w-80 rounded-full bg-secondary/20 blur-3xl animate-[floatPulse_16s_ease-in-out_infinite]" />
-        <div className="absolute top-1/3 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-white/40 blur-[120px]" />
-      </div>
-
-      <div className="relative flex h-full w-full gap-6 p-6">
-      {/* Sidebar */}
-      <aside className={cn("bg-white/80 border border-white/60 backdrop-blur-xl transition-all duration-300 flex flex-col shrink-0 rounded-[28px] shadow-[var(--shadow-card)]", sidebarCollapsed ? "w-16" : "w-64")}>
-        <div className="p-4 flex items-center justify-between border-b border-slate-100/60">
-          {!sidebarCollapsed && (
-            <div className="space-y-1">
-              <h1 className="font-bold text-xl text-primary truncate">Daily Planner</h1>
-              <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400">Focus Studio</p>
-            </div>
-          )}
-          <button onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="p-1 hover:bg-slate-100/70 rounded shrink-0">
-            {sidebarCollapsed ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
-          </button>
+    <PomodoroProvider>
+      <div className="relative flex h-screen w-screen overflow-hidden text-slate-900">
+        <div className="pointer-events-none absolute inset-0">
+          <div className="absolute -top-20 -right-10 h-72 w-72 rounded-full bg-primary/20 blur-3xl animate-[floatPulse_14s_ease-in-out_infinite]" />
+          <div className="absolute bottom-10 left-6 h-80 w-80 rounded-full bg-secondary/20 blur-3xl animate-[floatPulse_16s_ease-in-out_infinite]" />
+          <div className="absolute top-1/3 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-white/40 blur-[120px]" />
         </div>
-        <nav className="flex-1 p-2 space-y-1.5">
-          {menuItems.map((item) => (
-            <button key={item.id} onClick={() => setActiveTab(item.id)} className={cn("w-full flex items-center p-3 rounded-2xl transition-all gap-3 group", activeTab === item.id ? "bg-primary text-white shadow-lg shadow-primary/20" : "text-slate-600 hover:bg-slate-100/70")}>
-              <div className={cn("p-2 rounded-xl transition-all", activeTab === item.id ? "bg-white/20" : "bg-slate-100 group-hover:bg-white")}>
-                <item.icon size={18} className="shrink-0" />
+
+        <div className="relative flex h-full w-full gap-6 p-6">
+        {/* Sidebar */}
+        <aside className={cn("bg-white/80 border border-white/60 backdrop-blur-xl transition-all duration-300 flex flex-col shrink-0 rounded-[28px] shadow-[var(--shadow-card)]", sidebarCollapsed ? "w-16" : "w-64")}>
+          <div className="p-4 flex items-center justify-between border-b border-slate-100/60">
+            {!sidebarCollapsed && (
+              <div className="space-y-1">
+                <h1 className="font-bold text-xl text-primary truncate">Daily Planner</h1>
+                <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400">Focus Studio</p>
               </div>
-              {!sidebarCollapsed && <span className="font-medium truncate">{item.label}</span>}
+            )}
+            <button onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="p-1 hover:bg-slate-100/70 rounded shrink-0">
+              {sidebarCollapsed ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
             </button>
-          ))}
-        </nav>
-        <div className="p-4 border-t border-slate-100/60">
-          <button onClick={() => setSettingsOpen(true)} className={cn("flex items-center text-slate-600 hover:bg-slate-100/70 p-2 rounded-2xl w-full transition-colors gap-3", sidebarCollapsed ? "justify-center" : "")}>
-            <SettingsIcon size={18} className="shrink-0" />
-            {!sidebarCollapsed && <span className="truncate">设置</span>}
-          </button>
-        </div>
-      </aside>
-
-      {/* Main Content */}
-      <main className="flex-1 min-w-0 flex flex-col overflow-hidden relative">
-        <header className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between shrink-0">
-          <div className="space-y-2">
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Today Focus</p>
-            <h2 className="text-3xl font-bold text-slate-800">{menuItems.find(i => i.id === activeTab)?.label}</h2>
-            <p className="text-slate-500">{format(new Date(), 'yyyy年MM月dd日 EEEE')}</p>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 w-full lg:w-auto">
-            <div className="bg-white/80 border border-white/60 rounded-2xl p-4 shadow-[var(--shadow-soft)] backdrop-blur-xl">
-              <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-slate-400">
-                <ListTodo size={14} /> 今日任务
-              </div>
-              <div className="text-2xl font-bold text-slate-800 mt-2">{todayStats.total}</div>
-            </div>
-            <div className="bg-white/80 border border-white/60 rounded-2xl p-4 shadow-[var(--shadow-soft)] backdrop-blur-xl">
-              <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-slate-400">
-                <CheckCircle2 size={14} /> 完成率
-              </div>
-              <div className="text-2xl font-bold text-primary mt-2">{todayStats.completionRate}%</div>
-            </div>
-            <div className="bg-white/80 border border-white/60 rounded-2xl p-4 shadow-[var(--shadow-soft)] backdrop-blur-xl">
-              <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-slate-400">
-                <Clock size={14} /> 计划时长
-              </div>
-              <div className="text-2xl font-bold text-secondary mt-2">{todayStats.hoursPlanned}h</div>
-            </div>
-          </div>
-          {notification && (
-            <div className="flex items-center gap-3 bg-white/90 border border-white/60 p-4 rounded-2xl shadow-2xl absolute right-8 top-8 z-50 max-w-sm backdrop-blur-xl animate-[fadeRise_0.4s_ease]">
-              <div className="p-2 bg-primary text-white rounded-xl shrink-0"><Bell size={18} /></div>
-              <div className="flex-1 min-w-0">
-                <h4 className="font-bold text-sm text-primary">{notification.title}</h4>
-                <p className="text-xs text-slate-600 break-words">{notification.message}</p>
-              </div>
-              <div className="flex flex-col gap-1">
-                 {notification.kind === 'habit' && (
-                   <button onClick={handleNotificationAction} className="text-xs bg-primary text-white px-2 py-1 rounded-lg hover:bg-primary-dark whitespace-nowrap">打卡</button>
-                 )}
-                 {notification.kind === 'task' && (
-                   <>
-                     <button onClick={handleNotificationAction} className="text-xs bg-primary text-white px-2 py-1 rounded-lg hover:bg-primary-dark whitespace-nowrap">完成</button>
-                     <button onClick={() => { setActiveTab('planner'); setNotification(null); }} className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 whitespace-nowrap">查看</button>
-                   </>
-                 )}
-                 {notification.kind === 'system' && (
-                   <button onClick={() => setNotification(null)} className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 whitespace-nowrap">知道了</button>
-                 )}
-                 {notification.kind === 'habit' && (
-                   <button onClick={() => setNotification(null)} className="text-xs text-slate-400 hover:text-slate-600 px-2 py-1 whitespace-nowrap">关闭</button>
-                 )}
-              </div>
-            </div>
-          )}
-        </header>
-        {(shouldShowPlanReminder || shouldShowReviewReminder) && (
-          <div className="mb-6 space-y-3">
-            {shouldShowPlanReminder && (
-              <div className="bg-white/90 border border-white/60 rounded-2xl shadow-[var(--shadow-soft)] p-4 flex flex-wrap items-center justify-between gap-4">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">周计划提醒</p>
-                  <h3 className="text-lg font-bold text-slate-800 mt-1">周一还没写周计划，记得定下本周目标</h3>
-                  <p className="text-xs text-slate-500 mt-1">写完后提醒会自动消失</p>
+          <nav className="flex-1 p-2 space-y-1.5">
+            {menuItems.map((item) => (
+              <button key={item.id} onClick={() => setActiveTab(item.id)} className={cn("w-full flex items-center p-3 rounded-2xl transition-all gap-3 group", activeTab === item.id ? "bg-primary text-white shadow-lg shadow-primary/20" : "text-slate-600 hover:bg-slate-100/70")}>
+                <div className={cn("p-2 rounded-xl transition-all", activeTab === item.id ? "bg-white/20" : "bg-slate-100 group-hover:bg-white")}>
+                  <item.icon size={18} className="shrink-0" />
                 </div>
-                <button
-                  onClick={() => setActiveTab('plan')}
-                  className="px-4 py-2 rounded-xl bg-primary text-white text-sm font-semibold hover:bg-primary-dark"
-                >
-                  去写周计划
-                </button>
+                {!sidebarCollapsed && <span className="font-medium truncate">{item.label}</span>}
+              </button>
+            ))}
+          </nav>
+          <div className="p-4 border-t border-slate-100/60">
+            <button onClick={() => setSettingsOpen(true)} className={cn("flex items-center text-slate-600 hover:bg-slate-100/70 p-2 rounded-2xl w-full transition-colors gap-3", sidebarCollapsed ? "justify-center" : "")}>
+              <SettingsIcon size={18} className="shrink-0" />
+              {!sidebarCollapsed && <span className="truncate">设置</span>}
+            </button>
+          </div>
+        </aside>
+
+        {/* Main Content */}
+        <main className="flex-1 min-w-0 flex flex-col overflow-hidden relative">
+          <header className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between shrink-0">
+            <div className="space-y-2">
+              <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Today Focus</p>
+              <h2 className="text-3xl font-bold text-slate-800">{menuItems.find(i => i.id === activeTab)?.label}</h2>
+              <p className="text-slate-500">{format(new Date(), 'yyyy年MM月dd日 EEEE')}</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 w-full lg:w-auto">
+              <div className="bg-white/80 border border-white/60 rounded-2xl p-4 shadow-[var(--shadow-soft)] backdrop-blur-xl">
+                <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-slate-400">
+                  <ListTodo size={14} /> 今日任务
+                </div>
+                <div className="text-2xl font-bold text-slate-800 mt-2">{todayStats.total}</div>
+              </div>
+              <div className="bg-white/80 border border-white/60 rounded-2xl p-4 shadow-[var(--shadow-soft)] backdrop-blur-xl">
+                <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-slate-400">
+                  <CheckCircle2 size={14} /> 完成率
+                </div>
+                <div className="text-2xl font-bold text-primary mt-2">{todayStats.completionRate}%</div>
+              </div>
+              <div className="bg-white/80 border border-white/60 rounded-2xl p-4 shadow-[var(--shadow-soft)] backdrop-blur-xl">
+                <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-slate-400">
+                  <Clock size={14} /> 计划时长
+                </div>
+                <div className="text-2xl font-bold text-secondary mt-2">{todayStats.hoursPlanned}h</div>
+              </div>
+            </div>
+            {notification && (
+              <div className="flex items-center gap-3 bg-white/90 border border-white/60 p-4 rounded-2xl shadow-2xl absolute right-8 top-8 z-50 max-w-sm backdrop-blur-xl animate-[fadeRise_0.4s_ease]">
+                <div className="p-2 bg-primary text-white rounded-xl shrink-0"><Bell size={18} /></div>
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-bold text-sm text-primary">{notification.title}</h4>
+                  <p className="text-xs text-slate-600 break-words">{notification.message}</p>
+                </div>
+                <div className="flex flex-col gap-1">
+                   {notification.kind === 'habit' && (
+                     <button onClick={handleNotificationAction} className="text-xs bg-primary text-white px-2 py-1 rounded-lg hover:bg-primary-dark whitespace-nowrap">打卡</button>
+                   )}
+                   {notification.kind === 'task' && (
+                     <>
+                       <button onClick={handleNotificationAction} className="text-xs bg-primary text-white px-2 py-1 rounded-lg hover:bg-primary-dark whitespace-nowrap">完成</button>
+                       <button onClick={() => { setActiveTab('planner'); setNotification(null); }} className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 whitespace-nowrap">查看</button>
+                     </>
+                   )}
+                   {notification.kind === 'system' && (
+                     <button onClick={() => setNotification(null)} className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 whitespace-nowrap">知道了</button>
+                   )}
+                   {notification.kind === 'habit' && (
+                     <button onClick={() => setNotification(null)} className="text-xs text-slate-400 hover:text-slate-600 px-2 py-1 whitespace-nowrap">关闭</button>
+                   )}
+                </div>
               </div>
             )}
-            {shouldShowReviewReminder && reviewTarget && (
-              <div className="bg-white/90 border border-white/60 rounded-2xl shadow-[var(--shadow-soft)] p-4 flex flex-wrap items-center justify-between gap-4">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">周回顾提醒</p>
-                  <h3 className="text-lg font-bold text-slate-800 mt-1">{reviewTarget.label}回顾还没完成</h3>
-                  <p className="text-xs text-slate-500 mt-1">补完回顾后提醒会自动消失</p>
+          </header>
+          {(shouldShowPlanReminder || shouldShowReviewReminder) && (
+            <div className="mb-6 space-y-3">
+              {shouldShowPlanReminder && (
+                <div className="bg-white/90 border border-white/60 rounded-2xl shadow-[var(--shadow-soft)] p-4 flex flex-wrap items-center justify-between gap-4">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.2em] text-slate-400">周计划提醒</p>
+                    <h3 className="text-lg font-bold text-slate-800 mt-1">周一还没写周计划，记得定下本周目标</h3>
+                    <p className="text-xs text-slate-500 mt-1">写完后提醒会自动消失</p>
+                  </div>
+                  <button
+                    onClick={() => setActiveTab('plan')}
+                    className="px-4 py-2 rounded-xl bg-primary text-white text-sm font-semibold hover:bg-primary-dark"
+                  >
+                    去写周计划
+                  </button>
                 </div>
-                <button
-                  onClick={() => setActiveTab('report')}
-                  className="px-4 py-2 rounded-xl bg-secondary text-white text-sm font-semibold hover:bg-secondary-dark"
-                >
-                  去回顾
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        <div className="bg-white/80 rounded-[28px] shadow-[var(--shadow-card)] border border-white/60 p-6 flex-1 flex flex-col min-h-0 overflow-hidden relative backdrop-blur-xl">
-          {activeTab === 'timeline' ? (
-            <TimelineView />
-          ) : (
-            <div className={cn("flex-1 overflow-y-auto pr-2 custom-scrollbar", activeTab === 'pomodoro' && "hidden")}>
-              {activeTab === 'planner' && <DailyPlanner />}
-              {activeTab === 'habits' && <HabitTracker />}
-              {activeTab === 'goals' && <QuarterlyGoals />}
-              {activeTab === 'plan' && <WeeklyPlan />}
-              {activeTab === 'report' && <WeeklyReport />}
-              {activeTab === 'ai' && <AIAssistant />}
+              )}
+              {shouldShowReviewReminder && reviewTarget && (
+                <div className="bg-white/90 border border-white/60 rounded-2xl shadow-[var(--shadow-soft)] p-4 flex flex-wrap items-center justify-between gap-4">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.2em] text-slate-400">周回顾提醒</p>
+                    <h3 className="text-lg font-bold text-slate-800 mt-1">{reviewTarget.label}回顾还没完成</h3>
+                    <p className="text-xs text-slate-500 mt-1">补完回顾后提醒会自动消失</p>
+                  </div>
+                  <button
+                    onClick={() => setActiveTab('report')}
+                    className="px-4 py-2 rounded-xl bg-secondary text-white text-sm font-semibold hover:bg-secondary-dark"
+                  >
+                    去回顾
+                  </button>
+                </div>
+              )}
             </div>
           )}
-          <div className={cn("h-full", activeTab === 'pomodoro' ? "block" : "hidden")}>
-            <PomodoroTimer />
+
+          <div className="bg-white/80 rounded-[28px] shadow-[var(--shadow-card)] border border-white/60 p-6 flex-1 flex flex-col min-h-0 overflow-hidden relative backdrop-blur-xl">
+            {activeTab === 'timeline' ? (
+              <TimelineView />
+            ) : (
+              <div className={cn("flex-1 overflow-y-auto pr-2 custom-scrollbar", activeTab === 'pomodoro' && "hidden")}>
+                {activeTab === 'planner' && <DailyPlanner />}
+                {activeTab === 'habits' && <HabitTracker />}
+                {activeTab === 'goals' && <QuarterlyGoals />}
+                {activeTab === 'plan' && <WeeklyPlan />}
+                {activeTab === 'report' && <WeeklyReport />}
+                {activeTab === 'ai' && <AIAssistant />}
+              </div>
+            )}
+            <div className={cn("h-full", activeTab === 'pomodoro' ? "block" : "hidden")}>
+              <PomodoroTimer />
+            </div>
           </div>
+        </main>
         </div>
-      </main>
+
+        <PomodoroFloatingBall onOpen={() => setActiveTab('pomodoro')} />
+        <Settings isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
       </div>
-
-      <Settings isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
-    </div>
+    </PomodoroProvider>
   );
 }
 

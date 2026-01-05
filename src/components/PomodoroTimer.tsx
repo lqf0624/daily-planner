@@ -1,124 +1,26 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Play, Pause, RotateCcw, Settings as SettingsIcon, X } from 'lucide-react';
-import { useAppStore } from '../stores/useAppStore';
+import React, { useState } from 'react';
+import { Play, Pause, RotateCcw, Settings as SettingsIcon } from 'lucide-react';
+import { usePomodoro } from '../contexts/PomodoroContext';
 import { cn } from '../utils/cn';
 
 const PomodoroTimer: React.FC = () => {
-  const { pomodoroSettings, updatePomodoroSettings } = useAppStore();
-  const [timeLeft, setTimeLeft] = useState(pomodoroSettings.workDuration * 60);
-  const [isActive, setIsActive] = useState(false);
-  const [mode, setMode] = useState<'work' | 'shortBreak' | 'longBreak'>('work');
-  const [sessionsCompleted, setSessionsCompleted] = useState(0);
+  const {
+    pomodoroSettings,
+    updatePomodoroSettings,
+    timeLeft,
+    isActive,
+    mode,
+    sessionsCompleted,
+    toggleTimer,
+    resetTimer,
+  } = usePomodoro();
   const [showSettings, setShowSettings] = useState(false);
-  const [popup, setPopup] = useState<{ title: string; message: string } | null>(null);
-  
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-
-  // Initialize audio
-  useEffect(() => {
-    audioRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3'); // Notification sound
-  }, []);
-
-  const playNotification = () => {
-    if (audioRef.current) {
-      audioRef.current.play().catch(e => console.log('Audio play failed', e));
-    }
-  };
-
-  const notifyPopup = useCallback((title: string, message: string) => {
-    setPopup({ title, message });
-    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-      new Notification(title, { body: message });
-    }
-  }, []);
-
-  const switchMode = useCallback((newMode: 'work' | 'shortBreak' | 'longBreak') => {
-    setMode(newMode);
-    let duration = pomodoroSettings.workDuration;
-    if (newMode === 'shortBreak') duration = pomodoroSettings.shortBreakDuration;
-    if (newMode === 'longBreak') duration = pomodoroSettings.longBreakDuration;
-    
-    setTimeLeft(duration * 60);
-    
-    // Auto start logic
-    if (newMode === 'work' && pomodoroSettings.autoStartPomodoros) {
-      setIsActive(true);
-    } else if (newMode !== 'work' && pomodoroSettings.autoStartBreaks) {
-      setIsActive(true);
-    } else {
-      setIsActive(false);
-    }
-  }, [pomodoroSettings]);
-
-  useEffect(() => {
-    if (isActive && timeLeft > 0) {
-      timerRef.current = setInterval(() => {
-        setTimeLeft(prev => prev - 1);
-      }, 1000);
-    } else if (timeLeft === 0) {
-      if (timerRef.current) clearInterval(timerRef.current);
-      playNotification();
-      
-      if (mode === 'work') {
-        const nextSessionCount = sessionsCompleted + 1;
-        setSessionsCompleted(nextSessionCount);
-        
-        if (nextSessionCount >= pomodoroSettings.maxSessions) {
-          setIsActive(false);
-          notifyPopup('番茄钟完成', '恭喜完成今日所有番茄钟！');
-          return;
-        }
-
-        if (nextSessionCount % pomodoroSettings.longBreakInterval === 0) {
-          notifyPopup('专注结束', '进入长休息，稍后继续保持节奏。');
-          switchMode('longBreak');
-        } else {
-          notifyPopup('专注结束', '短休开始，放松一下。');
-          switchMode('shortBreak');
-        }
-      } else {
-        notifyPopup(mode === 'longBreak' ? '长休结束' : '休息结束', '回到专注，继续下一轮。');
-        switchMode('work');
-      }
-    }
-
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [isActive, timeLeft, mode, sessionsCompleted, pomodoroSettings, switchMode, notifyPopup]);
-
-  const toggleTimer = () => setIsActive(!isActive);
-  
-  const resetTimer = () => {
-    setIsActive(false);
-    switchMode(mode);
-  };
 
   const minutes = Math.floor(timeLeft / 60);
   const seconds = timeLeft % 60;
 
   return (
     <div className="flex flex-col items-center justify-center h-full space-y-8 relative">
-      {popup && (
-        <div className="absolute top-4 right-4 z-30 bg-white/90 border border-white/60 rounded-2xl shadow-[var(--shadow-card)] p-4 max-w-xs animate-[fadeRise_0.3s_ease]">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h4 className="text-sm font-bold text-primary">{popup.title}</h4>
-              <p className="text-xs text-slate-600 mt-1">{popup.message}</p>
-            </div>
-            <button onClick={() => setPopup(null)} className="text-slate-400 hover:text-slate-600">
-              <X size={16} />
-            </button>
-          </div>
-          <button
-            onClick={() => setPopup(null)}
-            className="mt-3 w-full rounded-xl bg-primary text-white text-xs font-semibold py-1.5 hover:bg-primary-dark"
-          >
-            知道了
-          </button>
-        </div>
-      )}
       <button 
         onClick={() => setShowSettings(!showSettings)}
         className="absolute top-0 right-0 p-2 text-slate-400 hover:text-primary transition-colors"
