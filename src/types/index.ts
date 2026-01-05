@@ -70,15 +70,6 @@ export interface AISettings {
   model: string;
 }
 
-export interface CaldavSettings {
-  serverUrl: string;
-  username: string;
-  password: string;
-  calendarName: string; // Default to 'DailyPlanner'
-  enabled: boolean;
-  lastSyncTime?: number;
-}
-
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;

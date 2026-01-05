@@ -19,7 +19,6 @@ import {
 import { cn } from './utils/cn';
 import { getDay, format, parseISO, differenceInMinutes, addMinutes, setHours, setMinutes, getISOWeek, getISOWeekYear, subWeeks } from 'date-fns';
 import { useAppStore } from './stores/useAppStore';
-import { checkAuthCallback } from './services/baiduService';
 import { Task } from './types';
 
 import DailyPlanner from './components/DailyPlanner';
@@ -64,11 +63,6 @@ function App() {
     if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
       new Notification(payload.title, { body: payload.message });
     }
-  }, []);
-
-  // Initial Auth Check
-  useEffect(() => {
-    checkAuthCallback();
   }, []);
 
   const menuItems = [

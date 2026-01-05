@@ -1,8 +1,6 @@
-import React, { useState } from 'react';
-import { X, Key, Save, Globe, Cpu, Calendar, RefreshCw, CheckCircle, Wifi } from 'lucide-react';
+import React from 'react';
+import { X, Key, Save, Globe, Cpu } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
-import { checkConnection, syncTasks } from '../services/caldavService';
-import { format } from 'date-fns';
 
 interface SettingsProps {
   isOpen: boolean;
@@ -10,43 +8,9 @@ interface SettingsProps {
 }
 
 const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
-  const { aiSettings, updateAISettings, caldavSettings, updateCaldavSettings } = useAppStore();
-  const [loading, setLoading] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const { aiSettings, updateAISettings } = useAppStore();
 
   if (!isOpen) return null;
-
-  const handleCheckConnection = async () => {
-    setLoading(true);
-    try {
-      const success = await checkConnection();
-      setConnectionStatus(success ? 'success' : 'error');
-      if (success) {
-          updateCaldavSettings({ enabled: true });
-          alert('连接成功！');
-      } else {
-          alert('连接失败：未找到日历');
-      }
-    } catch (e: any) {
-      setConnectionStatus('error');
-      alert(e.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSync = async () => {
-    setLoading(true);
-    try {
-      await syncTasks();
-      updateCaldavSettings({ lastSyncTime: Date.now() });
-      alert('同步成功！');
-    } catch (e: any) {
-      alert('同步失败: ' + e.message);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 animate-in fade-in duration-200 backdrop-blur-sm">
@@ -100,71 +64,6 @@ const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
                   className="w-full p-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary outline-none"
                 />
               </div>
-            </div>
-          </section>
-          
-          <hr className="border-slate-100" />
-
-          {/* CalDAV Settings */}
-          <section>
-            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-               <Calendar size={16} /> CalDAV 日历同步
-               {connectionStatus === 'success' && <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full flex items-center gap-1"><CheckCircle size={10} /> 已连接</span>}
-            </h4>
-            
-            <div className="bg-white/70 p-4 rounded-2xl space-y-4 border border-white/60">
-               <div className="space-y-2">
-                 <label className="text-xs font-bold text-slate-500">服务器地址 (Server URL)</label>
-                 <input 
-                   type="text" 
-                   value={caldavSettings.serverUrl}
-                   onChange={e => updateCaldavSettings({ serverUrl: e.target.value })}
-                   placeholder="https://caldav.example.com/"
-                   className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm"
-                 />
-               </div>
-
-               <div className="grid grid-cols-2 gap-4">
-                 <div className="space-y-2">
-                   <label className="text-xs font-bold text-slate-500">用户名</label>
-                   <input 
-                     type="text" 
-                     value={caldavSettings.username}
-                     onChange={e => updateCaldavSettings({ username: e.target.value })}
-                   className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm"
-                 />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-500">密码 / 应用密码</label>
-                  <input 
-                     type="password" 
-                     value={caldavSettings.password}
-                     onChange={e => updateCaldavSettings({ password: e.target.value })}
-                   className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm"
-                 />
-                </div>
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                 <button 
-                   onClick={handleCheckConnection}
-                   disabled={loading || !caldavSettings.serverUrl}
-                   className="flex-1 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg text-sm font-bold hover:bg-slate-50 flex items-center justify-center gap-2"
-                 >
-                   <Wifi size={16} /> 测试连接
-                 </button>
-                 <button 
-                   onClick={handleSync}
-                   disabled={loading || !caldavSettings.enabled}
-                   className="flex-1 py-2 bg-primary text-white rounded-lg text-sm font-bold hover:bg-primary-dark disabled:opacity-50 flex items-center justify-center gap-2"
-                 >
-                   <RefreshCw size={16} className={loading ? 'animate-spin' : ''} /> 立即同步
-                 </button>
-              </div>
-               
-               {caldavSettings.lastSyncTime && (
-                   <p className="text-[10px] text-center text-slate-400">上次同步: {format(caldavSettings.lastSyncTime, 'yyyy-MM-dd HH:mm:ss')}</p>
-               )}
             </div>
           </section>
 

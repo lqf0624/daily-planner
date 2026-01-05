@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { Task, Group, QuarterlyGoal, WeeklyPlan, PomodoroSettings, AISettings, ChatMessage, Habit, CaldavSettings } from '../types';
+import { Task, Group, QuarterlyGoal, WeeklyPlan, PomodoroSettings, AISettings, ChatMessage, Habit } from '../types';
 
 interface AppState {
   tasks: Task[];
@@ -10,7 +10,6 @@ interface AppState {
   habits: Habit[]; 
   pomodoroSettings: PomodoroSettings;
   aiSettings: AISettings;
-  caldavSettings: CaldavSettings; // Changed
   chatHistory: ChatMessage[];
   _hasHydrated: boolean;
   
@@ -38,8 +37,7 @@ interface AppState {
   toggleWeeklyGoal: (weekYearKey: string, goalId: string) => void;
   updatePomodoroSettings: (settings: Partial<PomodoroSettings>) => void;
   updateAISettings: (settings: Partial<AISettings>) => void;
-  updateCaldavSettings: (settings: Partial<CaldavSettings>) => void; // Changed
-  
+
   addChatMessage: (message: ChatMessage) => void;
   clearChatHistory: () => void;
 }
@@ -68,13 +66,6 @@ export const useAppStore = create<AppState>()(
         baseUrl: 'https://api.openai.com/v1',
         apiKey: '',
         model: 'gpt-3.5-turbo',
-      },
-      caldavSettings: {
-        serverUrl: '',
-        username: '',
-        password: '',
-        calendarName: 'DailyPlanner',
-        enabled: false,
       },
       chatHistory: [
         { role: 'assistant', content: '你好！我是你的 AI 任务助手。我已经准备好为您服务了。', timestamp: Date.now() }
@@ -169,10 +160,6 @@ export const useAppStore = create<AppState>()(
       updateAISettings: (settings) => set((state) => ({
         aiSettings: { ...state.aiSettings, ...settings }
       })),
-      updateCaldavSettings: (settings) => set((state) => ({
-        caldavSettings: { ...state.caldavSettings, ...settings }
-      })),
-      
       addChatMessage: (message) => set((state) => ({ chatHistory: [...state.chatHistory, message] })),
       clearChatHistory: () => set({ chatHistory: [] }),
     }),
