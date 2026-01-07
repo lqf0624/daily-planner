@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, Trash2, Languages, Info, Download, CheckCircle2, Loader2 } from 'lucide-react';
+import { X, Save, Trash2, Languages, Info, Download, CheckCircle2, Loader2, Globe, Cpu, Key } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../utils/cn';
@@ -12,7 +12,7 @@ interface SettingsProps {
 type UpdateStatus = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error' | 'latest';
 
 const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
-  const { clearPomodoroHistory, language, setLanguage } = useAppStore();
+  const { aiSettings, updateAISettings, clearPomodoroHistory, language, setLanguage } = useAppStore();
   const [showConfirmClear, setShowConfirmClear] = useState(false);
   
   // 更新相关状态
@@ -20,10 +20,15 @@ const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
   const [updateInfo, setUpdateInfo] = useState<{ version: string, url: string, notes?: string } | null>(null);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloadPath, setDownloadPath] = useState('');
-  const currentVersion = '0.1.13';
+  const [currentVersion, setCurrentVersion] = useState('0.1.14');
 
   useEffect(() => {
     if (!window.ipcRenderer) return;
+
+    // 获取真实版本号
+    window.ipcRenderer.invoke('app:get-version').then((v: unknown) => {
+      if (typeof v === 'string') setCurrentVersion(v);
+    });
 
     const progressHandler = (_: unknown, progress: unknown) => {
       setUpdateStatus('downloading');
@@ -57,6 +62,7 @@ const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
     setUpdateStatus('checking');
     try {
       const result = await window.ipcRenderer.invoke('app:check-update') as { version: string, url: string, notes?: string } | null;
+      // 关键修复：对比版本号，去掉 'v' 前缀
       if (result && result.version !== currentVersion) {
         setUpdateInfo(result);
         setUpdateStatus('available');
@@ -89,7 +95,6 @@ const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 animate-in fade-in duration-200 backdrop-blur-sm p-4">
       <div className="bg-white/90 rounded-[28px] w-full max-w-lg p-6 shadow-[var(--shadow-card)] border border-white/60 overflow-y-auto max-h-[90vh] relative">
         
-        {/* 更新专用全屏遮罩 */}
         <AnimatePresence>
           {(updateStatus === 'downloading' || updateStatus === 'ready' || updateStatus === 'available') && (
             <motion.div 
@@ -121,11 +126,7 @@ const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
                     <p className="text-sm text-slate-500 mt-1">请勿关闭应用，下载完成后将提示安装</p>
                   </div>
                   <div className="w-full bg-slate-100 h-4 rounded-full overflow-hidden border border-slate-200 p-0.5">
-                    <motion.div 
-                      initial={{ width: 0 }}
-                      animate={{ width: `${downloadProgress}%` }}
-                      className="h-full bg-primary rounded-full shadow-sm"
-                    />
+                    <motion.div initial={{ width: 0 }} animate={{ width: `${downloadProgress}%` }} className="h-full bg-primary rounded-full shadow-sm" />
                   </div>
                   <span className="text-2xl font-black text-primary font-mono">{downloadProgress}%</span>
                 </div>
@@ -168,6 +169,30 @@ const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
                   <option value="zh-CN">简体中文</option>
                   <option value="en-US">English</option>
                 </select>
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">{language === 'zh-CN' ? 'AI 助手配置 (OpenAI 风格)' : 'AI Assistant (OpenAI Style)'}</h4>
+            <div className="space-y-4 bg-white/70 border border-white/60 rounded-2xl p-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-2">
+                  <Globe size={16} /> {language === 'zh-CN' ? 'API 基础地址 (Base URL)' : 'API Base URL'}
+                </label>
+                <input type="text" value={aiSettings.baseUrl} onChange={(e) => updateAISettings({ baseUrl: e.target.value })} placeholder="https://api.openai.com/v1" className="w-full p-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary outline-none text-sm" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-2">
+                  <Cpu size={16} /> {language === 'zh-CN' ? '模型名称 (Model)' : 'Model Name'}
+                </label>
+                <input type="text" value={aiSettings.model} onChange={(e) => updateAISettings({ model: e.target.value })} placeholder="gpt-3.5-turbo" className="w-full p-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary outline-none text-sm" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-2">
+                  <Key size={16} /> API Key
+                </label>
+                <input type="password" value={aiSettings.apiKey} onChange={(e) => updateAISettings({ apiKey: e.target.value })} placeholder="sk-..." className="w-full p-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary outline-none text-sm" />
               </div>
             </div>
           </section>

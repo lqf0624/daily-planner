@@ -157,6 +157,8 @@ function createTray() {
       },
       { label: '显示/隐藏悬浮窗', click: () => toggleFloatingWindow() },
       { type: 'separator' },
+      { label: '检查更新', click: () => shell.openExternal('https://github.com/lqf0624/daily-planner-ai/releases/latest') },
+      { type: 'separator' },
       { label: '退出', click: () => { isQuitting = true; app.quit(); } }
     ]);
     tray?.setContextMenu(contextMenu);
@@ -200,11 +202,13 @@ function createFloatingWindow() {
   floatingWin.on('closed', () => { floatingWin = null; });
 }
 
-// --- 自定义更新系统 ---
+// --- 更新系统 ---
 interface GitHubAsset {
   name: string;
   browser_download_url: string;
 }
+
+ipcMain.handle('app:get-version', () => app.getVersion());
 
 ipcMain.handle('app:check-update', async () => {
   return new Promise((resolve) => {
@@ -220,7 +224,6 @@ ipcMain.handle('app:check-update', async () => {
         try {
           const release = JSON.parse(data);
           const version = release.tag_name.replace('v', '');
-          // 根据平台寻找对应的资产
           const platformExt = process.platform === 'win32' ? '.exe' : '.dmg';
           const asset = release.assets.find((a: GitHubAsset) => a.name.endsWith(platformExt));
           resolve({ version, url: asset?.browser_download_url, notes: release.body });
@@ -233,27 +236,21 @@ ipcMain.handle('app:check-update', async () => {
 ipcMain.on('app:start-download', (event, url) => {
   const fileName = path.basename(url);
   const filePath = path.join(app.getPath('downloads'), fileName);
-  
   const file = fs.createWriteStream(filePath);
   
-  // 处理 GitHub 的 302 重定向
   const download = (targetUrl: string) => {
     https.get(targetUrl, { headers: { 'User-Agent': 'Daily-Planner-AI' } }, (res) => {
       if (res.statusCode === 302 && res.headers.location) {
         download(res.headers.location);
         return;
       }
-
       const totalSize = parseInt(res.headers['content-length'] || '0', 10);
       let downloadedSize = 0;
-
       res.on('data', (chunk) => {
         downloadedSize += chunk.length;
         file.write(chunk);
-        const progress = totalSize ? Math.round((downloadedSize / totalSize) * 100) : 0;
-        event.reply('app:download-progress', progress);
+        event.reply('app:download-progress', totalSize ? Math.round((downloadedSize / totalSize) * 100) : 0);
       });
-
       res.on('end', () => {
         file.end();
         event.reply('app:download-complete', filePath);
@@ -263,13 +260,10 @@ ipcMain.on('app:start-download', (event, url) => {
       event.reply('app:download-error', err.message);
     });
   };
-
   download(url);
 });
 
-ipcMain.on('app:install-update', (_event, filePath) => {
-  shell.openPath(filePath);
-});
+ipcMain.on('app:install-update', (_event, filePath) => { shell.openPath(filePath); });
 
 // --- IPC 监听 ---
 ipcMain.on('floating:toggle', () => toggleFloatingWindow());
