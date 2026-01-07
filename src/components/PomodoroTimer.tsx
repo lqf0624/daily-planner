@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Play, Pause, RotateCcw, Settings as SettingsIcon, Monitor } from 'lucide-react';
+import { Play, Pause, RotateCcw, Settings as SettingsIcon, Monitor, AlertCircle } from 'lucide-react';
 import { usePomodoro } from '../contexts/PomodoroContext';
 import { cn } from '../utils/cn';
 
@@ -15,11 +15,25 @@ const PomodoroTimer: React.FC = () => {
     resetTimer,
   } = usePomodoro();
   const [showSettings, setShowSettings] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   const toggleFloatingWindow = () => {
     if (typeof window !== 'undefined' && window.ipcRenderer) {
       window.ipcRenderer.send('floating:toggle');
     }
+  };
+
+  const handleResetClick = () => {
+    if (isActive && mode === 'work') {
+      setShowResetConfirm(true);
+    } else {
+      resetTimer();
+    }
+  };
+
+  const confirmReset = () => {
+    resetTimer();
+    setShowResetConfirm(false);
   };
 
   const minutes = Math.floor(timeLeft / 60);
@@ -41,6 +55,32 @@ const PomodoroTimer: React.FC = () => {
       >
         <SettingsIcon size={24} />
       </button>
+
+      {showResetConfirm && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/90 backdrop-blur-sm rounded-[28px] animate-in fade-in">
+          <div className="text-center p-8 max-w-xs space-y-4">
+            <div className="mx-auto w-12 h-12 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center">
+              <AlertCircle size={24} />
+            </div>
+            <h3 className="font-bold text-slate-800">终止当前专注？</h3>
+            <p className="text-sm text-slate-500">当前进度将不会计入今日番茄钟统计。</p>
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setShowResetConfirm(false)}
+                className="flex-1 py-2 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-colors"
+              >
+                继续
+              </button>
+              <button 
+                onClick={confirmReset}
+                className="flex-1 py-2 bg-red-500 text-white rounded-xl font-bold hover:bg-red-600 shadow-lg shadow-red-200 transition-colors"
+              >
+                终止
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showSettings ? (
         <div className="w-full max-w-md bg-slate-50 p-6 rounded-2xl border border-slate-200 space-y-4 animate-in fade-in zoom-in-95">
@@ -129,7 +169,7 @@ const PomodoroTimer: React.FC = () => {
                 {isActive ? <Pause size={32} /> : <Play size={32} className="ml-1" />}
               </button>
               <button
-                onClick={resetTimer}
+                onClick={handleResetClick}
                 className="w-20 h-20 rounded-3xl bg-slate-100 text-slate-400 hover:bg-slate-200 flex items-center justify-center transition-all"
               >
                 <RotateCcw size={32} />

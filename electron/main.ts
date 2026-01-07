@@ -118,10 +118,10 @@ function startTimer() {
 function stopTimer() {
   if (mainTimer) clearInterval(mainTimer);
   mainTimer = null;
-  broadcastState(); // 确保停止状态立即同步
 }
 
 function getIconPath() {
+  // 优先尝试 ico，SVG 在 Windows 托盘兼容性差
   return path.join(process.env.VITE_PUBLIC, 'electron-vite.svg');
 }
 
@@ -137,29 +137,38 @@ function updateTray() {
 function createTray() {
   if (tray) return;
   const icon = nativeImage.createFromPath(getIconPath());
+  // Windows 下必须 resize 到 16x16 或 32x32 才能正常显示
   tray = new Tray(icon.resize({ width: 16, height: 16 }));
   
-  const contextMenu = Menu.buildFromTemplate([
-    { label: '打开主窗口', click: () => { win?.show(); win?.focus(); } },
-    { type: 'separator' },
-    { label: '开始/暂停', click: () => {
-        pomodoroState.isActive = !pomodoroState.isActive;
-        if (pomodoroState.isActive) startTimer(); else stopTimer();
-        broadcastState();
-      }
-    },
-    { type: 'separator' },
-    { label: '显示/隐藏悬浮窗', click: () => {
-        if (floatingWin?.isVisible()) floatingWin.hide();
-        else { if (!floatingWin) createFloatingWindow(); else floatingWin.show(); }
-      }
-    },
-    { type: 'separator' },
-    { label: '退出', click: () => { isQuitting = true; app.quit(); } }
-  ]);
+  const updateMenu = () => {
+    const contextMenu = Menu.buildFromTemplate([
+      { label: '打开主窗口', click: () => { win?.show(); win?.focus(); } },
+      { type: 'separator' },
+      { label: pomodoroState.isActive ? '暂停' : '开始', click: () => {
+          pomodoroState.isActive = !pomodoroState.isActive;
+          if (pomodoroState.isActive) startTimer(); else stopTimer();
+          broadcastState();
+          updateMenu();
+        }
+      },
+      { label: '显示/隐藏悬浮窗', click: () => toggleFloatingWindow() },
+      { type: 'separator' },
+      { label: '退出', click: () => { isQuitting = true; app.quit(); } }
+    ]);
+    tray?.setContextMenu(contextMenu);
+  };
   
-  tray.setContextMenu(contextMenu);
   tray.on('click', () => { win?.show(); win?.focus(); });
+  updateMenu();
+}
+
+function toggleFloatingWindow() {
+  if (floatingWin && !floatingWin.isDestroyed()) {
+    if (floatingWin.isVisible()) floatingWin.hide();
+    else floatingWin.show();
+  } else {
+    createFloatingWindow();
+  }
 }
 
 function createWindow() {
@@ -174,24 +183,29 @@ function createWindow() {
 }
 
 function createFloatingWindow() {
-  if (floatingWin) return;
+  if (floatingWin && !floatingWin.isDestroyed()) return;
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   floatingWin = new BrowserWindow({
-    width: 220, height: 220, // 初始球形尺寸
+    width: 220, height: 220,
     x: width - 240, y: height - 240,
     frame: false, transparent: true, alwaysOnTop: true, skipTaskbar: true,
     backgroundColor: '#00000000',
     webPreferences: { preload: path.join(__dirname, 'preload.mjs'), backgroundThrottling: false }
   });
   floatingWin.loadURL(`${VITE_DEV_SERVER_URL || 'file://' + path.join(RENDERER_DIST, 'index.html')}?view=floating`);
+  floatingWin.on('closed', () => { floatingWin = null; });
 }
 
-// --- IPC 新增 ---
+// --- IPC 监听 ---
+ipcMain.on('floating:toggle', () => toggleFloatingWindow());
+ipcMain.on('floating:show', () => {
+  if (floatingWin) floatingWin.show(); else createFloatingWindow();
+});
+
 ipcMain.on('floating:resize', (_event, size: { width: number, height: number }) => {
   if (floatingWin) {
     const [oldWidth, oldHeight] = floatingWin.getSize();
     const [oldX, oldY] = floatingWin.getPosition();
-    // 保持右下角对齐缩放
     const newX = oldX + (oldWidth - size.width);
     const newY = oldY + (oldHeight - size.height);
     floatingWin.setBounds({ x: newX, y: newY, width: size.width, height: size.height });

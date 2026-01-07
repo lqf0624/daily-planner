@@ -46,6 +46,13 @@ const WeeklyReport: React.FC = () => {
     }
     return acc;
   }, { minutes: 0, sessions: 0 });
+
+  const formatFocusTime = (totalMinutes: number) => {
+    const h = Math.floor(totalMinutes / 60);
+    const m = totalMinutes % 60;
+    if (h > 0) return `${h} 小时 ${m} 分钟`;
+    return `${m} 分钟`;
+  };
   
   const completedCount = weekTasks.filter(t => t.isCompleted).length;
   const totalCount = weekTasks.length;
@@ -100,9 +107,10 @@ const WeeklyReport: React.FC = () => {
           <div className="text-slate-500 text-xs uppercase tracking-widest mb-2 flex items-center gap-2">
             <Clock size={16} /> 专注时长
           </div>
-          <div className="text-3xl font-bold text-orange-500">
-            {focusStats.minutes} <span className="text-sm font-normal text-slate-400">分钟</span>
+          <div className="text-2xl font-bold text-orange-500">
+            {formatFocusTime(focusStats.minutes)}
           </div>
+          <div className="text-[10px] text-slate-400 mt-1">共 {focusStats.sessions} 个完成番茄钟</div>
         </div>
       </div>
 

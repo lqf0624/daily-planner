@@ -162,6 +162,7 @@ export const useAppStore = create<AppState>()(
         pomodoroSettings: { ...state.pomodoroSettings, ...settings }
       })),
       logPomodoroSession: (date, minutes) => set((state) => {
+        if (minutes <= 0) return state; // 防御性检查
         const prev = state.pomodoroHistory[date] ?? { minutes: 0, sessions: 0 };
         return {
           pomodoroHistory: {
