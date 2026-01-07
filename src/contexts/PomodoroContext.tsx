@@ -161,7 +161,8 @@ export const PomodoroProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (typeof window === 'undefined' || !window.ipcRenderer) return;
 
     // 获取初始状态
-    window.ipcRenderer.invoke('pomodoro:getState').then((state: PomodoroState) => {
+    window.ipcRenderer.invoke('pomodoro:getState').then((result: unknown) => {
+      const state = result as PomodoroState;
       if (state) {
         setTimeLeft(state.timeLeft);
         setIsActive(state.isActive);
@@ -172,7 +173,8 @@ export const PomodoroProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
 
     // 监听时间跳动
-    const stateHandler = (_event: unknown, state: PomodoroState) => {
+    const stateHandler = (_event: unknown, payload: unknown) => {
+      const state = payload as PomodoroState;
       setTimeLeft(state.timeLeft);
       setIsActive(state.isActive);
       setMode(state.mode);
