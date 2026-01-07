@@ -12,10 +12,6 @@ export default defineConfig({
         // Shortcut of `build.lib.entry`.
         entry: 'electron/main.ts',
         onstart(args) {
-          if (process.env.ELECTRON_STARTER === 'manual') {
-            args.reload();
-            return;
-          }
           args.startup();
         },
       },
