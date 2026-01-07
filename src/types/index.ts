@@ -69,6 +69,8 @@ export interface PomodoroDailyStats {
   sessions: number;
 }
 
+export type PomodoroMode = 'work' | 'shortBreak' | 'longBreak';
+
 export type PomodoroHistory = Record<string, PomodoroDailyStats>;
 
 export interface AISettings {

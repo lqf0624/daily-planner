@@ -3,7 +3,7 @@ import { Plus, Check, Trash2, CalendarDays, X, Activity, Clock } from 'lucide-re
 import { useAppStore } from '../stores/useAppStore';
 import { cn } from '../utils/cn';
 import { format, parseISO, getDay, subDays } from 'date-fns';
-import { FrequencyType } from '../types';
+import { FrequencyType, Habit } from '../types';
 
 
 const HabitTracker = () => {
@@ -64,7 +64,7 @@ const HabitTracker = () => {
     }
   };
 
-  const isHabitDue = (habit: any, dateStr: string) => {
+  const isHabitDue = (habit: Habit, dateStr: string) => {
     const date = parseISO(dateStr);
     const dayOfWeek = getDay(date); // 0-6
 

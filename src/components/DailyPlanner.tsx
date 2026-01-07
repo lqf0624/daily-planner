@@ -18,6 +18,7 @@ import {
 import { useAppStore } from '../stores/useAppStore';
 import { cn } from '../utils/cn';
 import { format, parseISO, addDays, differenceInMinutes, addMinutes } from 'date-fns';
+import { Task } from '../types';
 
 const DailyPlanner: React.FC = () => {
   const { tasks, addTask, updateTask, deleteTask, groups, addGroup, deleteGroup } = useAppStore();
@@ -160,7 +161,7 @@ const DailyPlanner: React.FC = () => {
     setIsAdding(false);
   };
 
-  const startEdit = (task: any) => {
+  const startEdit = (task: Task) => {
     setEditingTaskId(task.id);
     setNewTaskTitle(task.title);
     setNewTaskDescription(task.description || '');
@@ -173,7 +174,7 @@ const DailyPlanner: React.FC = () => {
     setIsAdding(true);
   };
 
-  const renderTaskCard = (task: any) => {
+  const renderTaskCard = (task: Task) => {
     const group = groups.find(g => g.id === task.groupId);
     const start = task.startTime ? format(parseISO(task.startTime), 'HH:mm') : null;
     const end = task.endTime ? format(parseISO(task.endTime), 'HH:mm') : null;

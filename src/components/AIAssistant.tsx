@@ -80,8 +80,9 @@ const AIAssistant: React.FC = () => {
 
       // Save AI response to store
       addChatMessage({ role: 'assistant', content: response, timestamp: Date.now() });
-    } catch (error: any) {
-      addChatMessage({ role: 'assistant', content: `错误: ${error.message}`, timestamp: Date.now() });
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      addChatMessage({ role: 'assistant', content: `错误: ${errorMessage}`, timestamp: Date.now() });
     } finally {
       setIsLoading(false);
     }

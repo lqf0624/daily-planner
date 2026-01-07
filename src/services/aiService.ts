@@ -57,7 +57,7 @@ export const chatWithAI = async (message: string, settings: AISettings, context?
     throw new Error('请在设置中配置 API Key');
   }
 
-  let messages = [
+  const messages = [
     { role: 'system', content: SYSTEM_PROMPT }
   ];
 
@@ -120,8 +120,10 @@ ${goalSummary}
     });
 
     return response.data.choices[0].message.content;
-  } catch (error: any) {
-    console.error('AI API Error:', error.response?.data || error.message);
-    throw new Error(error.response?.data?.error?.message || '与 AI 通信时出错，请检查 API 设置');
+  } catch (error: unknown) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const err = error as any;
+    console.error('AI API Error:', err.response?.data || err.message);
+    throw new Error(err.response?.data?.error?.message || '与 AI 通信时出错，请检查 API 设置');
   }
 };

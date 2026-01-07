@@ -91,7 +91,14 @@ const WindowControls = () => {
   );
 };
 
-const CloseConfirmationModal = ({ isOpen, onClose, onConfirmExit, onConfirmMinimize }: any) => {
+interface CloseConfirmationModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirmExit: () => void;
+  onConfirmMinimize: () => void;
+}
+
+const CloseConfirmationModal = ({ isOpen, onClose, onConfirmExit, onConfirmMinimize }: CloseConfirmationModalProps) => {
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/20 backdrop-blur-sm no-drag">
@@ -173,7 +180,7 @@ const ToastContainer = ({ toasts, removeToast }: { toasts: ToastType[], removeTo
 };
 
 function App() {
-  const { weeklyPlans, habits, tasks, toggleHabitCompletion, updateTask, _hasHydrated } = useAppStore();
+  const { weeklyPlans, habits, tasks, _hasHydrated } = useAppStore();
   const [activeTab, setActiveTab] = useState('planner');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -195,7 +202,6 @@ function App() {
   const pushNotification = useCallback((payload: AppNotification) => {
     if (document.hasFocus()) {
       const id = Date.now().toString() + Math.random();
-      // @ts-ignore
       setToasts(prev => [...prev, { id, ...payload }]);
       setTimeout(() => {
         setToasts(prev => prev.filter(t => t.id !== id));
@@ -231,7 +237,7 @@ function App() {
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.ipcRenderer) return;
-    const handler = (_event: unknown, tab: string) => {
+    const handler = (_event: unknown, tab: unknown) => {
       if (typeof tab === 'string') {
         setActiveTab(tab);
       }

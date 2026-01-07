@@ -52,7 +52,8 @@ const FloatingPomodoro: React.FC = () => {
     if (typeof window === 'undefined' || !window.ipcRenderer) return;
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
-    const position = await window.ipcRenderer.invoke('floating:getPosition');
+    const result = await window.ipcRenderer.invoke('floating:getPosition');
+    const position = result as { x: number; y: number };
     const baseX = typeof position?.x === 'number' ? position.x : 0;
     const baseY = typeof position?.y === 'number' ? position.y : 0;
     dragRef.current = {

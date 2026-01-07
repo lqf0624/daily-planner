@@ -1,10 +1,8 @@
 import React, { createContext, useCallback, useContext, useMemo, useRef, useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { useAppStore } from '../stores/useAppStore';
-import { PomodoroSettings } from '../types';
+import { PomodoroSettings, PomodoroMode } from '../types';
 import { showToast } from '../utils/events';
-
-export type PomodoroMode = 'work' | 'shortBreak' | 'longBreak';
 
 type PomodoroPopup = {
   title: string;
@@ -192,10 +190,11 @@ export const PomodoroProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     if (!isFloatingView || typeof window === 'undefined' || !window.ipcRenderer) return;
     let mounted = true;
-    window.ipcRenderer.invoke('pomodoro:getState').then((state: PomodoroState | null) => {
+    window.ipcRenderer.invoke('pomodoro:getState').then((result: unknown) => {
+      const state = result as PomodoroState | null;
       if (mounted) applyRemoteState(state);
     });
-    const handler = (_event: unknown, state: PomodoroState) => applyRemoteState(state);
+    const handler = (_event: unknown, state: unknown) => applyRemoteState(state as PomodoroState);
     window.ipcRenderer.on('pomodoro:state', handler);
     return () => {
       mounted = false;
@@ -205,8 +204,9 @@ export const PomodoroProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   useEffect(() => {
     if (isFloatingView || typeof window === 'undefined' || !window.ipcRenderer) return;
-    const handler = (_event: unknown, action: PomodoroAction) => {
-      if (!action || typeof action !== 'object') return;
+    const handler = (_event: unknown, payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return;
+      const action = payload as PomodoroAction;
       switch (action.type) {
         case 'toggle':
           toggleTimer();
@@ -321,6 +321,7 @@ export const PomodoroProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   );
 };
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const usePomodoro = () => {
   const context = useContext(PomodoroContext);
   if (!context) {
