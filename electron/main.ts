@@ -1,6 +1,8 @@
-import { app, BrowserWindow, ipcMain, screen, Menu, nativeImage, Tray, Notification } from 'electron'
+import { app, BrowserWindow, ipcMain, screen, Menu, nativeImage, Tray, Notification, shell } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import https from 'node:https'
+import fs from 'node:fs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 process.env.APP_ROOT = path.join(__dirname, '..')
@@ -57,11 +59,26 @@ function formatTime(seconds: number) {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
+function getIconPath() {
+  const iconName = 'electron-vite.svg';
+  const base = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : path.join(app.getAppPath(), 'dist');
+  return path.join(base, iconName);
+}
+
+function updateTray() {
+  if (!tray) return;
+  const timeStr = formatTime(pomodoroState.timeLeft);
+  if (process.platform === 'darwin') {
+    const prefix = pomodoroState.mode === 'work' ? '专注' : '休息';
+    tray.setTitle(pomodoroState.isActive ? `${prefix} ${timeStr}` : '');
+  }
+  tray.setToolTip(`Daily Planner - ${pomodoroState.mode === 'work' ? '专注' : '休息'} [${timeStr}]`);
+}
+
 function broadcastState() {
   const payload = JSON.parse(JSON.stringify(pomodoroState));
-  [win, floatingWin].forEach(w => {
-    if (w && !w.isDestroyed()) w.webContents.send('pomodoro:state', payload);
-  });
+  if (win && !win.isDestroyed()) win.webContents.send('pomodoro:state', payload);
+  if (floatingWin && !floatingWin.isDestroyed()) floatingWin.webContents.send('pomodoro:state', payload);
   updateTray();
 }
 
@@ -120,26 +137,12 @@ function stopTimer() {
   mainTimer = null;
 }
 
-function getIconPath() {
-  // 优先尝试 ico，SVG 在 Windows 托盘兼容性差
-  return path.join(process.env.VITE_PUBLIC, 'electron-vite.svg');
-}
-
-function updateTray() {
-  if (!tray) return;
-  const timeStr = formatTime(pomodoroState.timeLeft);
-  if (process.platform === 'darwin') {
-    const prefix = pomodoroState.mode === 'work' ? '专注' : '休息';
-    tray.setTitle(pomodoroState.isActive ? `${prefix} ${timeStr}` : '');
-  }
-  tray.setToolTip(`Daily Planner - ${pomodoroState.mode === 'work' ? '专注' : '休息'} [${timeStr}]`);
-}
-
 function createTray() {
   if (tray) return;
-  const icon = nativeImage.createFromPath(getIconPath());
-  // Windows 下必须 resize 到 16x16 或 32x32 才能正常显示
-  tray = new Tray(icon.resize({ width: 16, height: 16 }));
+  const iconPath = getIconPath();
+  const icon = nativeImage.createFromPath(iconPath);
+  const trayIcon = icon.isEmpty() ? nativeImage.createEmpty() : icon.resize({ width: 16, height: 16 });
+  tray = new Tray(trayIcon);
   
   const updateMenu = () => {
     const contextMenu = Menu.buildFromTemplate([
@@ -197,53 +200,110 @@ function createFloatingWindow() {
   floatingWin.on('closed', () => { floatingWin = null; });
 }
 
-// --- IPC 监听 ---
-ipcMain.on('floating:toggle', () => toggleFloatingWindow());
-ipcMain.on('floating:show', () => {
-  if (floatingWin) floatingWin.show(); else createFloatingWindow();
+// --- 自定义更新系统 ---
+interface GitHubAsset {
+  name: string;
+  browser_download_url: string;
+}
+
+ipcMain.handle('app:check-update', async () => {
+  return new Promise((resolve) => {
+    const options = {
+      hostname: 'api.github.com',
+      path: '/repos/lqf0624/daily-planner-ai/releases/latest',
+      headers: { 'User-Agent': 'Daily-Planner-AI' }
+    };
+    https.get(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => {
+        try {
+          const release = JSON.parse(data);
+          const version = release.tag_name.replace('v', '');
+          // 根据平台寻找对应的资产
+          const platformExt = process.platform === 'win32' ? '.exe' : '.dmg';
+          const asset = release.assets.find((a: GitHubAsset) => a.name.endsWith(platformExt));
+          resolve({ version, url: asset?.browser_download_url, notes: release.body });
+        } catch (e) { resolve(null); }
+      });
+    }).on('error', () => resolve(null));
+  });
 });
 
-ipcMain.on('floating:resize', (_event, size: { width: number, height: number }) => {
+ipcMain.on('app:start-download', (event, url) => {
+  const fileName = path.basename(url);
+  const filePath = path.join(app.getPath('downloads'), fileName);
+  
+  const file = fs.createWriteStream(filePath);
+  
+  // 处理 GitHub 的 302 重定向
+  const download = (targetUrl: string) => {
+    https.get(targetUrl, { headers: { 'User-Agent': 'Daily-Planner-AI' } }, (res) => {
+      if (res.statusCode === 302 && res.headers.location) {
+        download(res.headers.location);
+        return;
+      }
+
+      const totalSize = parseInt(res.headers['content-length'] || '0', 10);
+      let downloadedSize = 0;
+
+      res.on('data', (chunk) => {
+        downloadedSize += chunk.length;
+        file.write(chunk);
+        const progress = totalSize ? Math.round((downloadedSize / totalSize) * 100) : 0;
+        event.reply('app:download-progress', progress);
+      });
+
+      res.on('end', () => {
+        file.end();
+        event.reply('app:download-complete', filePath);
+      });
+    }).on('error', (err) => {
+      fs.unlink(filePath, () => {});
+      event.reply('app:download-error', err.message);
+    });
+  };
+
+  download(url);
+});
+
+ipcMain.on('app:install-update', (_event, filePath) => {
+  shell.openPath(filePath);
+});
+
+// --- IPC 监听 ---
+ipcMain.on('floating:toggle', () => toggleFloatingWindow());
+ipcMain.on('floating:show', () => { if (floatingWin) floatingWin.show(); else createFloatingWindow(); });
+ipcMain.on('floating:resize', (_event, size) => {
   if (floatingWin) {
     const [oldWidth, oldHeight] = floatingWin.getSize();
     const [oldX, oldY] = floatingWin.getPosition();
-    const newX = oldX + (oldWidth - size.width);
-    const newY = oldY + (oldHeight - size.height);
-    floatingWin.setBounds({ x: newX, y: newY, width: size.width, height: size.height });
+    floatingWin.setBounds({ x: oldX + (oldWidth - size.width), y: oldY + (oldHeight - size.height), width: size.width, height: size.height });
   }
 });
 
 ipcMain.on('pomodoro:action', (_, action) => {
   switch (action.type) {
-    case 'toggle':
-      pomodoroState.isActive = !pomodoroState.isActive;
-      if (pomodoroState.isActive) startTimer(); else stopTimer();
-      break;
-    case 'reset':
-      pomodoroState.isActive = false;
-      pomodoroState.timeLeft = pomodoroState.pomodoroSettings.workDuration * 60;
-      stopTimer();
-      break;
-    case 'skip':
-      if (pomodoroState.mode !== 'work') handleModeComplete();
-      break;
-    case 'dismissPopup':
-      pomodoroState.popup = null;
-      break;
-    case 'updateSettings':
-      pomodoroState.pomodoroSettings = { ...pomodoroState.pomodoroSettings, ...action.settings };
-      if (!pomodoroState.isActive) pomodoroState.timeLeft = pomodoroState.pomodoroSettings.workDuration * 60;
-      break;
+    case 'toggle': pomodoroState.isActive = !pomodoroState.isActive; if (pomodoroState.isActive) startTimer(); else stopTimer(); break;
+    case 'reset': pomodoroState.isActive = false; pomodoroState.timeLeft = pomodoroState.pomodoroSettings.workDuration * 60; stopTimer(); break;
+    case 'skip': if (pomodoroState.mode !== 'work') handleModeComplete(); break;
+    case 'dismissPopup': pomodoroState.popup = null; break;
+    case 'updateSettings': pomodoroState.pomodoroSettings = { ...pomodoroState.pomodoroSettings, ...action.settings }; if (!pomodoroState.isActive) pomodoroState.timeLeft = pomodoroState.pomodoroSettings.workDuration * 60; break;
   }
   broadcastState();
 });
 
 ipcMain.handle('pomodoro:getState', () => pomodoroState);
-
-app.whenReady().then(() => {
-  createTray();
-  createWindow();
-  createFloatingWindow();
+ipcMain.on('window-control', (_event, action) => {
+  if (!win || win.isDestroyed()) return;
+  if (action === 'minimize') win.minimize();
+  else if (action === 'maximize') win.isMaximized() ? win.unmaximize() : win.maximize();
+  else if (action === 'close') win.close();
 });
+ipcMain.handle('floating:getPosition', () => floatingWin ? { x: floatingWin.getPosition()[0], y: floatingWin.getPosition()[1] } : { x: 0, y: 0 });
+ipcMain.on('floating:setPosition', (_event, pos) => { if (floatingWin) floatingWin.setPosition(pos.x, pos.y); });
+ipcMain.handle('floating:getAlwaysOnTop', () => floatingWin?.isAlwaysOnTop() || false);
+ipcMain.handle('floating:setAlwaysOnTop', (_event, enabled) => { floatingWin?.setAlwaysOnTop(enabled, 'floating'); return enabled; });
 
+app.whenReady().then(() => { createTray(); createWindow(); createFloatingWindow(); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

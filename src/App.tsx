@@ -65,24 +65,24 @@ const WindowControls = () => {
   };
 
   return (
-    <div className="absolute top-0 right-0 flex items-center gap-0 z-[100] no-drag pr-2 pt-1">
+    <div className="absolute top-0 right-0 flex items-center gap-0 z-[200] no-drag pr-2 pt-1 pointer-events-auto">
       <button 
-        onClick={() => handleControl('minimize')} 
-        className="p-2 text-slate-400 hover:bg-slate-200/50 hover:text-slate-600 transition-colors rounded-full"
+        onClick={(e) => { e.stopPropagation(); handleControl('minimize'); }} 
+        className="p-2 text-slate-400 hover:bg-slate-200/50 hover:text-slate-600 transition-colors rounded-full cursor-pointer"
         title="最小化"
       >
         <Minus size={14} />
       </button>
       <button 
-        onClick={() => handleControl('maximize')} 
-        className="p-2 text-slate-400 hover:bg-slate-200/50 hover:text-slate-600 transition-colors rounded-full"
+        onClick={(e) => { e.stopPropagation(); handleControl('maximize'); }} 
+        className="p-2 text-slate-400 hover:bg-slate-200/50 hover:text-slate-600 transition-colors rounded-full cursor-pointer"
         title="最大化"
       >
         <Square size={12} />
       </button>
       <button 
-        onClick={() => handleControl('close')} 
-        className="p-2 text-slate-400 hover:bg-red-500/10 hover:text-red-500 transition-colors rounded-full"
+        onClick={(e) => { e.stopPropagation(); handleControl('close'); }} 
+        className="p-2 text-slate-400 hover:bg-red-500/10 hover:text-red-500 transition-colors rounded-full cursor-pointer"
         title="关闭"
       >
         <CloseIcon size={14} />

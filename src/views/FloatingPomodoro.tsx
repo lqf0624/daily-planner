@@ -9,7 +9,6 @@ type DragState = {
   pendingX: number;
   pendingY: number;
   rafId: number | null;
-  moved: boolean;
 };
 
 const FloatingPomodoro: React.FC = () => {
@@ -41,20 +40,23 @@ const FloatingPomodoro: React.FC = () => {
     setAlwaysOnTop(typeof result === 'boolean' ? result : next);
   };
 
+  // 关键修复：手动处理拖拽，不使用 CSS drag-region
   const handlePointerDown = async (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     const target = event.target as HTMLElement;
-    if (target.closest('.no-drag')) return; // 如果点在按钮上，不触发拖拽
+    // 如果点在按钮或图标上，允许按钮自己的 onClick 触发，不开启拖拽
+    if (target.closest('button')) return;
 
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
-    const result = await window.ipcRenderer.invoke('floating:getPosition');
-    const position = result as { x: number; y: number };
+    
+    const position = await window.ipcRenderer.invoke('floating:getPosition') as { x: number, y: number };
     dragRef.current = {
       offsetX: event.screenX - (position?.x || 0),
       offsetY: event.screenY - (position?.y || 0),
-      pendingX: position?.x || 0, pendingY: position?.y || 0,
-      rafId: null, moved: false,
+      pendingX: position?.x || 0,
+      pendingY: position?.y || 0,
+      rafId: null,
     };
   };
 
@@ -64,10 +66,13 @@ const FloatingPomodoro: React.FC = () => {
     const nextY = Math.round(event.screenY - dragRef.current.offsetY);
     dragRef.current.pendingX = nextX;
     dragRef.current.pendingY = nextY;
+    
     if (dragRef.current.rafId === null) {
       dragRef.current.rafId = window.requestAnimationFrame(() => {
-        window.ipcRenderer.send('floating:setPosition', { x: dragRef.current!.pendingX, y: dragRef.current!.pendingY });
-        if (dragRef.current) dragRef.current.rafId = null;
+        if (dragRef.current) {
+          window.ipcRenderer.send('floating:setPosition', { x: dragRef.current.pendingX, y: dragRef.current.pendingY });
+          dragRef.current.rafId = null;
+        }
       });
     }
   };
@@ -95,23 +100,22 @@ const FloatingPomodoro: React.FC = () => {
   const timeText = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
   const ringColor = mode === 'work' ? 'rgba(15, 118, 110, 0.95)' : 'rgba(249, 115, 22, 0.95)';
 
-  // --- 迷你条模式 ---
   if (isMiniBar) {
     return (
       <div 
-        className="h-full w-full p-1 select-none overflow-hidden"
+        className="h-screen w-screen p-1 select-none flex items-center justify-center overflow-hidden"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
       >
         <div 
-          className="relative flex h-full w-full items-center justify-between px-3 rounded-full border border-white/40 bg-white/80 shadow-lg backdrop-blur-xl drag-region"
+          className="relative flex h-full w-full items-center justify-between px-3 rounded-full border border-white/40 bg-white/80 shadow-xl backdrop-blur-xl transition-all"
           style={{ borderLeft: `4px solid ${ringColor}` }}
         >
-          <div className="flex items-center gap-2 no-drag">
+          <div className="flex items-center gap-2">
             <button 
               onClick={(e) => { e.stopPropagation(); toggleTimer(); }} 
-              className="p-1 text-slate-600 hover:text-primary transition-colors cursor-pointer"
+              className="p-1 text-slate-600 hover:text-primary transition-colors cursor-pointer active:scale-90"
             >
               {isActive ? <Pause size={14} /> : <Play size={14} />}
             </button>
@@ -121,7 +125,7 @@ const FloatingPomodoro: React.FC = () => {
           </div>
           <button 
             onClick={(e) => { e.stopPropagation(); setIsMiniBar(false); }} 
-            className="no-drag text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+            className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer active:scale-90"
           >
             <Maximize2 size={12} />
           </button>
@@ -130,24 +134,23 @@ const FloatingPomodoro: React.FC = () => {
     );
   }
 
-  // --- 球形模式 ---
   return (
-    <div className="h-full w-full p-3 select-none overflow-hidden">
-      <div 
-        className="relative h-full w-full overflow-hidden rounded-[28px] border border-white/70 bg-white/80 shadow-[var(--shadow-card)] backdrop-blur-xl drag-region"
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-      >
+    <div 
+      className="h-screen w-screen p-3 select-none flex items-center justify-center overflow-hidden"
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+    >
+      <div className="relative h-full w-full overflow-hidden rounded-[28px] border border-white/70 bg-white/80 shadow-2xl backdrop-blur-xl">
         <div className="absolute -top-10 -right-6 h-24 w-24 rounded-full bg-primary/20 blur-2xl" />
         <div className="relative z-10 flex h-full flex-col items-center justify-between p-3 text-slate-800">
           <div className="flex w-full items-center justify-between">
             <span className="text-[10px] uppercase tracking-[0.3em] text-slate-400">Pomodoro</span>
-            <div className="flex items-center gap-1 no-drag">
-              <button onClick={(e) => { e.stopPropagation(); setIsMiniBar(true); }} className="rounded-xl border border-white/60 px-2 py-1 text-slate-500 hover:bg-white/70 transition-colors cursor-pointer" title="切换到迷你条模式">
+            <div className="flex items-center gap-1">
+              <button onClick={(e) => { e.stopPropagation(); setIsMiniBar(true); }} className="rounded-xl border border-white/60 px-2 py-1 text-slate-500 hover:bg-white/70 transition-colors cursor-pointer active:scale-90" title="迷你条模式">
                 <Minimize2 size={14} />
               </button>
-              <button onClick={handleTogglePin} className={cn("rounded-xl border px-2 py-1 text-slate-500 hover:bg-white/70 transition-colors cursor-pointer", alwaysOnTop ? "border-primary/30 text-primary" : "border-white/60")}>
+              <button onClick={handleTogglePin} className={cn("rounded-xl border px-2 py-1 text-slate-500 hover:bg-white/70 transition-colors cursor-pointer active:scale-90", alwaysOnTop ? "border-primary/30 text-primary" : "border-white/60")}>
                 {alwaysOnTop ? <Pin size={14} /> : <PinOff size={14} />}
               </button>
             </div>
@@ -163,7 +166,7 @@ const FloatingPomodoro: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 no-drag">
+          <div className="flex items-center gap-1.5">
             <button onClick={(e) => { e.stopPropagation(); toggleTimer(); }} className={cn("rounded-xl px-3 py-2 text-xs font-semibold transition-all flex items-center gap-1 active:scale-95 cursor-pointer", isActive ? "bg-white/70 text-slate-600 hover:bg-white/90" : "bg-primary text-white hover:bg-primary-dark")}>
               {isActive ? <Pause size={14} /> : <Play size={14} />} {isActive ? '暂停' : '开始'}
             </button>
