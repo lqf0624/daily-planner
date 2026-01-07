@@ -6,7 +6,7 @@
   "author": "lqf0624",
   "type": "module",
   "scripts": {
-    "dev": "node scripts/dev-electron.mjs",
+    "dev": "vite",
     "dev:ui": "vite",
     "dev:web": "vite",
     "build": "tsc && vite build && electron-builder --publish=never",

@@ -27,9 +27,13 @@
   ],
   "mac": {
     "target": [
-      "dmg"
+      {
+        "target": "dmg",
+        "arch": [
+          "universal"
+        ]
+      }
     ],
-    "identity": null,
     "artifactName": "${productName}-Mac-${version}-Installer.${ext}"
   },
   "win": {

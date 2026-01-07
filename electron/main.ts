@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, screen, dialog, Menu, nativeImage, Tray } from 'electron'
+import { app, BrowserWindow, ipcMain, screen, Menu, nativeImage, Tray } from 'electron'
 import type { BrowserWindowConstructorOptions } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'

@@ -179,7 +179,6 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [closeModalOpen, setCloseModalOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastType[]>([]);
-  const [notification, setNotification] = useState<AppNotification | null>(null); // Keep for compatibility if needed, but we rely on toasts now
   const lastTaskReminderRef = useRef<Record<string, string>>({});
   const [clockTick, setClockTick] = useState(Date.now());
 
@@ -389,21 +388,6 @@ function App() {
       </div>
     );
   }
-
-  const handleNotificationAction = () => {
-    if (!notification) return;
-    if (notification.kind === 'habit' && notification.habitId) {
-      toggleHabitCompletion(notification.habitId, format(new Date(), 'yyyy-MM-dd'));
-      setNotification(null);
-      return;
-    }
-    if (notification.kind === 'task' && notification.taskId) {
-      updateTask(notification.taskId, { isCompleted: true });
-      setNotification(null);
-      return;
-    }
-    setNotification(null);
-  };
 
   return (
       <div 
