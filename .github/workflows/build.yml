@@ -27,7 +27,7 @@ jobs:
         shell: bash
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          npm version --no-git-tag-version "$VERSION"
+          npm version --no-git-tag-version "$VERSION" --allow-same-version
       - run: npm run build:win
         if: matrix.os == 'windows-latest'
       - run: npm run build:mac
