@@ -12,9 +12,11 @@ interface AppState {
   pomodoroHistory: PomodoroHistory;
   aiSettings: AISettings;
   chatHistory: ChatMessage[];
+  language: 'zh-CN' | 'en-US';
   _hasHydrated: boolean;
   
   setHasHydrated: (state: boolean) => void;
+  setLanguage: (lang: 'zh-CN' | 'en-US') => void;
   importData: (data: Partial<AppState>) => void; 
 
   addTask: (task: Task) => void;
@@ -38,6 +40,7 @@ interface AppState {
   toggleWeeklyGoal: (weekYearKey: string, goalId: string) => void;
   updatePomodoroSettings: (settings: Partial<PomodoroSettings>) => void;
   logPomodoroSession: (date: string, minutes: number) => void;
+  clearPomodoroHistory: () => void;
   updateAISettings: (settings: Partial<AISettings>) => void;
 
   addChatMessage: (message: ChatMessage) => void;
@@ -73,9 +76,11 @@ export const useAppStore = create<AppState>()(
       chatHistory: [
         { role: 'assistant', content: '你好！我是你的 AI 任务助手。我已经准备好为您服务了。', timestamp: Date.now() }
       ],
+      language: 'zh-CN',
       _hasHydrated: false,
 
       setHasHydrated: (state) => set({ _hasHydrated: state }),
+      setLanguage: (lang) => set({ language: lang }),
       
       importData: (data) => set((state) => ({
         tasks: data.tasks || state.tasks,
@@ -86,6 +91,7 @@ export const useAppStore = create<AppState>()(
         pomodoroSettings: data.pomodoroSettings || state.pomodoroSettings,
         pomodoroHistory: data.pomodoroHistory || state.pomodoroHistory,
         aiSettings: data.aiSettings || state.aiSettings,
+        language: data.language || state.language,
       })),
 
       addTask: (task) => set((state) => ({ tasks: [...state.tasks, task] })),
@@ -174,6 +180,7 @@ export const useAppStore = create<AppState>()(
           },
         };
       }),
+      clearPomodoroHistory: () => set({ pomodoroHistory: {} }),
       updateAISettings: (settings) => set((state) => ({
         aiSettings: { ...state.aiSettings, ...settings }
       })),

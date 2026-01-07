@@ -129,7 +129,8 @@ function updateTray() {
   if (!tray) return;
   const timeStr = formatTime(pomodoroState.timeLeft);
   if (process.platform === 'darwin') {
-    tray.setTitle(pomodoroState.isActive ? ` ${timeStr}` : '');
+    const prefix = pomodoroState.mode === 'work' ? '专注' : '休息';
+    tray.setTitle(pomodoroState.isActive ? `${prefix} ${timeStr}` : '');
   }
   tray.setToolTip(`Daily Planner - ${pomodoroState.mode === 'work' ? '专注' : '休息'} [${timeStr}]`);
 }
