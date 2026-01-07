@@ -1,12 +1,18 @@
 import React from 'react';
 import { BarChart, CheckCircle2, Clock, Sparkles } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
-import { isAfter, subDays, parseISO, getISOWeek, getISOWeekYear, subWeeks, endOfISOWeek, format, getDay, startOfISOWeekYear, addWeeks, startOfDay, endOfDay, isWithinInterval } from 'date-fns';
+import { parseISO, getISOWeek, getISOWeekYear, subWeeks, endOfISOWeek, startOfISOWeek, format, getDay, startOfISOWeekYear, addWeeks, isWithinInterval } from 'date-fns';
 
 const WeeklyReport: React.FC = () => {
   const { tasks, weeklyPlans, updateWeeklyPlan, pomodoroHistory } = useAppStore();
-  const lastWeekTasks = tasks.filter(t => isAfter(parseISO(t.createdAt), subDays(new Date(), 7)));
   const now = new Date();
+  const weekStart = startOfISOWeek(now);
+  const weekEnd = endOfISOWeek(now);
+  const weekTasks = tasks.filter(t => {
+    const day = parseISO(t.date);
+    if (Number.isNaN(day.getTime())) return false;
+    return isWithinInterval(day, { start: weekStart, end: weekEnd });
+  });
   const currentWeek = getISOWeek(now);
   const currentWeekYear = getISOWeekYear(now);
   const lastWeekDate = subWeeks(now, 1);
@@ -31,20 +37,18 @@ const WeeklyReport: React.FC = () => {
   const targetWeekEnd = reviewTarget ? endOfISOWeek(targetWeekStart!) : null;
   const incompleteGoals = targetPlan?.goals.filter(g => !g.isCompleted) ?? [];
   const missingReasons = incompleteGoals.filter(g => !g.incompleteReason?.trim()).length;
-  const focusStart = startOfDay(subDays(now, 6));
-  const focusEnd = endOfDay(now);
   const focusStats = Object.entries(pomodoroHistory).reduce((acc, [date, stats]) => {
     const day = parseISO(date);
     if (Number.isNaN(day.getTime())) return acc;
-    if (isWithinInterval(day, { start: focusStart, end: focusEnd })) {
+    if (isWithinInterval(day, { start: weekStart, end: weekEnd })) {
       acc.minutes += stats.minutes;
       acc.sessions += stats.sessions;
     }
     return acc;
   }, { minutes: 0, sessions: 0 });
   
-  const completedCount = lastWeekTasks.filter(t => t.isCompleted).length;
-  const totalCount = lastWeekTasks.length;
+  const completedCount = weekTasks.filter(t => t.isCompleted).length;
+  const totalCount = weekTasks.length;
   const completionRate = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
   const updateGoalReason = (goalId: string, reason: string) => {
@@ -105,7 +109,7 @@ const WeeklyReport: React.FC = () => {
       <div className="bg-white/80 p-6 rounded-2xl border border-white/60 shadow-[var(--shadow-soft)]">
         <div className="flex items-center justify-between mb-4">
           <h4 className="font-bold text-slate-800 flex items-center gap-2"><Sparkles size={16} className="text-primary" /> 效率建议</h4>
-          <span className="text-[10px] uppercase tracking-[0.2em] text-slate-400">近 7 天</span>
+          <span className="text-[10px] uppercase tracking-[0.2em] text-slate-400">本周</span>
         </div>
         <p className="text-slate-600 text-sm leading-relaxed">
           {completionRate > 80 

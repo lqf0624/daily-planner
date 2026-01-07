@@ -1,4 +1,5 @@
-import { app, BrowserWindow, ipcMain, screen } from 'electron'
+import { app, BrowserWindow, ipcMain, screen, dialog, Menu, nativeImage, Tray } from 'electron'
+import type { BrowserWindowConstructorOptions } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
@@ -32,26 +33,83 @@ type PomodoroState = {
 let win: BrowserWindow | null
 let floatingWin: BrowserWindow | null
 let pomodoroState: PomodoroState | null = null
+let tray: Tray | null = null
+let isQuitting = false
+
+function showMainWindow() {
+  if (!win || win.isDestroyed()) {
+    createWindow()
+  } else {
+    win.show()
+    win.focus()
+  }
+  if (process.platform === 'darwin') {
+    app.dock?.show()
+  }
+}
+
+function getTrayIcon() {
+  const iconPath = path.join(process.env.VITE_PUBLIC, 'electron-vite.svg')
+  const icon = nativeImage.createFromPath(iconPath)
+  if (!icon.isEmpty()) return icon
+  return nativeImage.createEmpty()
+}
+
+function createTray() {
+  if (tray) return
+  tray = new Tray(getTrayIcon())
+  tray.setToolTip('Daily Planner')
+  tray.on('click', () => {
+    showMainWindow()
+  })
+  const contextMenu = Menu.buildFromTemplate([
+    { label: '打开主窗口', click: () => showMainWindow() },
+    { label: '退出', click: () => quitApp() },
+  ])
+  tray.setContextMenu(contextMenu)
+}
+
+function quitApp() {
+  isQuitting = true
+  if (floatingWin && !floatingWin.isDestroyed()) {
+    floatingWin.destroy()
+  }
+  if (win && !win.isDestroyed()) {
+    win.destroy()
+  }
+  app.quit()
+}
 
 function createWindow() {
-  win = new BrowserWindow({
+  const windowOptions: BrowserWindowConstructorOptions = {
     icon: path.join(process.env.VITE_PUBLIC, 'electron-vite.svg'),
     width: 1200,
     height: 800,
     title: 'Daily Planner',
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
       nodeIntegration: false,
       contextIsolation: true,
+      backgroundThrottling: false,
       webSecurity: false, // 允许跨域请求，解决 CalDAV 连接问题
     },
-  })
+    ...(process.platform === 'darwin'
+      ? { titleBarStyle: 'hiddenInset' }
+      : {}),
+    ...(process.platform === 'win32'
+      ? { titleBarOverlay: { color: '#f6f2ec', symbolColor: '#0f172a', height: 34 } }
+      : {}),
+  }
+  win = new BrowserWindow(windowOptions)
 
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL)
   } else {
     win.loadFile(path.join(RENDERER_DIST, 'index.html'))
   }
+
+  win.setMenuBarVisibility(false)
 
   // 关键修复：确保窗口加载后输入法能正常唤起
   win.webContents.on('dom-ready', () => {
@@ -76,6 +134,30 @@ function createWindow() {
   win.on('closed', () => {
     win = null;
   });
+
+  win.on('close', async (event) => {
+    if (isQuitting) return
+    event.preventDefault()
+    const result = await dialog.showMessageBox(win!, {
+      type: 'question',
+      buttons: ['最小化到托盘', '退出', '取消'],
+      defaultId: 0,
+      cancelId: 2,
+      message: '关闭 Daily Planner？',
+      detail: '最小化到托盘将继续计时，退出会关闭悬浮球并停止计时。',
+    })
+    if (result.response === 0) {
+      createTray()
+      win?.hide()
+      if (process.platform === 'darwin') {
+        app.dock?.hide()
+      }
+      return
+    }
+    if (result.response === 1) {
+      quitApp()
+    }
+  })
 }
 
 function createFloatingWindow() {
@@ -97,6 +179,7 @@ function createFloatingWindow() {
       preload: path.join(__dirname, 'preload.mjs'),
       nodeIntegration: false,
       contextIsolation: true,
+      backgroundThrottling: false,
     },
   });
 
@@ -189,6 +272,8 @@ app.on('window-all-closed', () => {
 app.on('activate', () => {
   if (!win || win.isDestroyed()) {
     createWindow()
+  } else {
+    showMainWindow()
   }
   if (!floatingWin || floatingWin.isDestroyed()) {
     createFloatingWindow()
@@ -196,6 +281,10 @@ app.on('activate', () => {
 })
 
 app.whenReady().then(() => {
+  Menu.setApplicationMenu(null)
+  app.on('before-quit', () => {
+    isQuitting = true
+  })
   createWindow()
   createFloatingWindow()
 })
