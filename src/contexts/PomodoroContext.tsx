@@ -12,6 +12,7 @@ type PomodoroPopup = {
 type PomodoroAction =
   | { type: 'toggle' }
   | { type: 'reset' }
+  | { type: 'skip' }
   | { type: 'switchMode'; mode: PomodoroMode }
   | { type: 'dismissPopup' }
   | { type: 'updateSettings'; settings: Partial<PomodoroSettings> };
@@ -34,6 +35,7 @@ type PomodoroContextValue = {
   sessionsCompleted: number;
   toggleTimer: () => void;
   resetTimer: () => void;
+  skipMode: () => void;
   switchMode: (mode: PomodoroMode) => void;
   popup: PomodoroPopup | null;
   dismissPopup: () => void;
@@ -43,91 +45,41 @@ const PomodoroContext = createContext<PomodoroContextValue | null>(null);
 
 export const PomodoroProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { pomodoroSettings, updatePomodoroSettings: updatePomodoroSettingsLocal, logPomodoroSession } = useAppStore();
-  const isFloatingView =
-    typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).get('view') === 'floating';
-
+  
   const [timeLeft, setTimeLeft] = useState(pomodoroSettings.workDuration * 60);
   const [isActive, setIsActive] = useState(false);
   const [mode, setMode] = useState<PomodoroMode>('work');
   const [sessionsCompleted, setSessionsCompleted] = useState(0);
   const [popup, setPopup] = useState<PomodoroPopup | null>(null);
-  const [remoteSettings, setRemoteSettings] = useState<PomodoroSettings | null>(null);
 
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const startAudioRef = useRef<HTMLAudioElement | null>(null);
-  const lastResetDateRef = useRef<string>(format(new Date(), 'yyyy-MM-dd'));
-  const zeroHandledRef = useRef(false);
-
-  const effectiveSettings = isFloatingView ? remoteSettings ?? pomodoroSettings : pomodoroSettings;
-
-  const sendAction = useCallback((action: PomodoroAction) => {
-    if (typeof window === 'undefined' || !window.ipcRenderer) return;
-    window.ipcRenderer.send('pomodoro:action', action);
-  }, []);
 
   useEffect(() => {
-    if (isFloatingView) return;
     audioRef.current = new Audio('/sounds/complete.mp3');
     startAudioRef.current = new Audio('/sounds/start.mp3');
-  }, [isFloatingView]);
+  }, []);
 
-  useEffect(() => {
-    if (isFloatingView) return;
-    const checkDailyReset = () => {
-      const today = format(new Date(), 'yyyy-MM-dd');
-      if (today === lastResetDateRef.current) return;
-      lastResetDateRef.current = today;
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-      setIsActive(false);
-      setSessionsCompleted(0);
-      setMode('work');
-      setTimeLeft(pomodoroSettings.workDuration * 60);
-      setPopup(null);
+  // 向主进程同步最新状态（当本地逻辑改变状态时调用）
+  const syncToMain = useCallback((overrides: Partial<PomodoroState> = {}) => {
+    if (typeof window === 'undefined' || !window.ipcRenderer) return;
+    const newState: PomodoroState = {
+      timeLeft,
+      isActive,
+      mode,
+      sessionsCompleted,
+      popup,
+      pomodoroSettings,
+      ...overrides
     };
-    checkDailyReset();
-    const interval = setInterval(checkDailyReset, 60 * 1000);
-    return () => clearInterval(interval);
-  }, [isFloatingView, pomodoroSettings.workDuration]);
-
-  const playNotification = useCallback(() => {
-    if (isFloatingView) return;
-    if (audioRef.current) {
-      audioRef.current.currentTime = 0;
-      audioRef.current.play().catch((e) => console.log('Complete audio play failed', e));
-    }
-  }, [isFloatingView]);
-
-  const playStartSound = useCallback(() => {
-    if (isFloatingView) return;
-    if (startAudioRef.current) {
-      startAudioRef.current.currentTime = 0;
-      startAudioRef.current.play().catch((e) => console.log('Start audio play failed', e));
-    }
-  }, [isFloatingView]);
+    window.ipcRenderer.send('pomodoro:sync-state', newState);
+  }, [timeLeft, isActive, mode, sessionsCompleted, popup, pomodoroSettings]);
 
   const notifyPopup = useCallback((title: string, message: string) => {
     setPopup({ title, message });
-    if (isFloatingView) {
-      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-        new Notification(title, { body: message });
-      }
-      return;
-    }
     showToast(title, message, 'system');
-  }, [isFloatingView]);
-
-  const dismissPopup = useCallback(() => {
-    if (isFloatingView) {
-      sendAction({ type: 'dismissPopup' });
-      return;
-    }
-    setPopup(null);
-  }, [isFloatingView, sendAction]);
+    syncToMain({ popup: { title, message } });
+  }, [syncToMain]);
 
   const getDurationMinutes = useCallback((targetMode: PomodoroMode) => {
     if (targetMode === 'shortBreak') return pomodoroSettings.shortBreakDuration;
@@ -135,161 +87,129 @@ export const PomodoroProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return pomodoroSettings.workDuration;
   }, [pomodoroSettings]);
 
-  const switchMode = useCallback((newMode: PomodoroMode) => {
-    if (isFloatingView) {
-      sendAction({ type: 'switchMode', mode: newMode });
-      return;
-    }
-    setMode(newMode);
-    setTimeLeft(getDurationMinutes(newMode) * 60);
+  const handleModeComplete = useCallback(() => {
+    if (audioRef.current) audioRef.current.play().catch(() => {});
+    
+    if (mode === 'work') {
+      const nextSessionCount = sessionsCompleted + 1;
+      setSessionsCompleted(nextSessionCount);
+      logPomodoroSession(format(new Date(), 'yyyy-MM-dd'), pomodoroSettings.workDuration);
 
-    const shouldAutoStart = newMode === 'work'
-      ? pomodoroSettings.autoStartPomodoros
-      : pomodoroSettings.autoStartBreaks;
-    setIsActive(Boolean(shouldAutoStart));
-  }, [getDurationMinutes, pomodoroSettings, isFloatingView, sendAction]);
+      if (nextSessionCount >= pomodoroSettings.maxSessions) {
+        setIsActive(false);
+        notifyPopup('番茄钟完成', '恭喜完成今日所有番茄钟！');
+        return;
+      }
+
+      const nextMode = (nextSessionCount % pomodoroSettings.longBreakInterval === 0) ? 'longBreak' : 'shortBreak';
+      const nextTime = getDurationMinutes(nextMode) * 60;
+      setMode(nextMode);
+      setTimeLeft(nextTime);
+      setIsActive(Boolean(pomodoroSettings.autoStartBreaks));
+      notifyPopup('专注结束', nextMode === 'longBreak' ? '进入长休息。' : '短休开始。');
+    } else {
+      const nextTime = pomodoroSettings.workDuration * 60;
+      setMode('work');
+      setTimeLeft(nextTime);
+      setIsActive(Boolean(pomodoroSettings.autoStartPomodoros));
+      notifyPopup('休息结束', '回到专注。');
+    }
+  }, [mode, sessionsCompleted, pomodoroSettings, logPomodoroSession, getDurationMinutes, notifyPopup]);
+
+  // --- 外部控制接口 ---
+  const toggleTimer = useCallback(() => {
+    const nextActive = !isActive;
+    setIsActive(nextActive);
+    if (nextActive && startAudioRef.current) startAudioRef.current.play().catch(() => {});
+    syncToMain({ isActive: nextActive });
+  }, [isActive, syncToMain]);
 
   const resetTimer = useCallback(() => {
-    if (isFloatingView) {
-      sendAction({ type: 'reset' });
-      return;
-    }
+    const nextTime = getDurationMinutes(mode) * 60;
+    setTimeLeft(nextTime);
     setIsActive(false);
-    switchMode(mode);
-  }, [isFloatingView, mode, sendAction, switchMode]);
+    syncToMain({ timeLeft: nextTime, isActive: false });
+  }, [mode, getDurationMinutes, syncToMain]);
 
-  const toggleTimer = useCallback(() => {
-    if (isFloatingView) {
-      sendAction({ type: 'toggle' });
-      return;
-    }
-    setIsActive((prev) => {
-      if (!prev) playStartSound();
-      return !prev;
-    });
-  }, [isFloatingView, sendAction, playStartSound]);
+  const skipMode = useCallback(() => {
+    if (mode !== 'work') handleModeComplete();
+  }, [mode, handleModeComplete]);
+
+  const switchMode = useCallback((newMode: PomodoroMode) => {
+    const nextTime = getDurationMinutes(newMode) * 60;
+    setMode(newMode);
+    setTimeLeft(nextTime);
+    setIsActive(false);
+    syncToMain({ mode: newMode, timeLeft: nextTime, isActive: false });
+  }, [getDurationMinutes, syncToMain]);
+
+  const dismissPopup = useCallback(() => {
+    setPopup(null);
+    syncToMain({ popup: null });
+  }, [syncToMain]);
 
   const updatePomodoroSettings = useCallback((settings: Partial<PomodoroSettings>) => {
-    if (isFloatingView) {
-      sendAction({ type: 'updateSettings', settings });
-      return;
-    }
     updatePomodoroSettingsLocal(settings);
-  }, [isFloatingView, sendAction, updatePomodoroSettingsLocal]);
+    // 设置改变后通常需要重置当前时间
+    if (settings.workDuration && mode === 'work') {
+      setTimeLeft(settings.workDuration * 60);
+    }
+  }, [updatePomodoroSettingsLocal, mode]);
 
-  const applyRemoteState = useCallback((state: PomodoroState | null) => {
-    if (!state) return;
-    setTimeLeft(state.timeLeft);
-    setIsActive(state.isActive);
-    setMode(state.mode);
-    setSessionsCompleted(state.sessionsCompleted);
-    setPopup(state.popup);
-    setRemoteSettings(state.pomodoroSettings);
-  }, []);
-
+  // --- 监听主进程消息 ---
   useEffect(() => {
-    if (!isFloatingView || typeof window === 'undefined' || !window.ipcRenderer) return;
-    let mounted = true;
-    window.ipcRenderer.invoke('pomodoro:getState').then((result: unknown) => {
-      const state = result as PomodoroState | null;
-      if (mounted) applyRemoteState(state);
+    if (typeof window === 'undefined' || !window.ipcRenderer) return;
+
+    // 获取初始状态
+    window.ipcRenderer.invoke('pomodoro:getState').then((state: PomodoroState) => {
+      if (state) {
+        setTimeLeft(state.timeLeft);
+        setIsActive(state.isActive);
+        setMode(state.mode);
+        setSessionsCompleted(state.sessionsCompleted);
+        setPopup(state.popup);
+      }
     });
-    const handler = (_event: unknown, state: unknown) => applyRemoteState(state as PomodoroState);
-    window.ipcRenderer.on('pomodoro:state', handler);
-    return () => {
-      mounted = false;
-      window.ipcRenderer.off('pomodoro:state', handler);
-    };
-  }, [applyRemoteState, isFloatingView]);
 
-  useEffect(() => {
-    if (isFloatingView || typeof window === 'undefined' || !window.ipcRenderer) return;
-    const handler = (_event: unknown, payload: unknown) => {
-      if (!payload || typeof payload !== 'object') return;
+    // 监听时间跳动
+    const stateHandler = (_event: unknown, state: PomodoroState) => {
+      setTimeLeft(state.timeLeft);
+      setIsActive(state.isActive);
+      setMode(state.mode);
+      setSessionsCompleted(state.sessionsCompleted);
+      setPopup(state.popup);
+    };
+
+    // 监听动作转发 (确保多窗口同步响应按钮点击)
+    const actionHandler = (_event: unknown, payload: unknown) => {
       const action = payload as PomodoroAction;
       switch (action.type) {
-        case 'toggle':
-          toggleTimer();
-          break;
-        case 'reset':
-          resetTimer();
-          break;
-        case 'switchMode':
-          switchMode(action.mode);
-          break;
-        case 'dismissPopup':
-          setPopup(null);
-          break;
-        case 'updateSettings':
-          updatePomodoroSettingsLocal(action.settings);
-          break;
+        case 'toggle': toggleTimer(); break;
+        case 'reset': resetTimer(); break;
+        case 'skip': skipMode(); break;
+        case 'switchMode': switchMode(action.mode); break;
+        case 'dismissPopup': dismissPopup(); break;
       }
     };
-    window.ipcRenderer.on('pomodoro:action', handler);
-    return () => {
-      window.ipcRenderer.off('pomodoro:action', handler);
+
+    // 监听模式完成信号
+    const completeHandler = () => {
+      handleModeComplete();
     };
-  }, [isFloatingView, resetTimer, switchMode, toggleTimer, updatePomodoroSettingsLocal]);
 
-  useEffect(() => {
-    if (isFloatingView || typeof window === 'undefined' || !window.ipcRenderer) return;
-    const state: PomodoroState = {
-      timeLeft,
-      isActive,
-      mode,
-      sessionsCompleted,
-      popup,
-      pomodoroSettings,
-    };
-    window.ipcRenderer.send('pomodoro:state', state);
-  }, [isFloatingView, timeLeft, isActive, mode, sessionsCompleted, popup, pomodoroSettings]);
-
-  useEffect(() => {
-    if (isFloatingView) return;
-    if (timeLeft > 0) {
-      zeroHandledRef.current = false;
-    }
-    if (isActive && timeLeft > 0) {
-      timerRef.current = setInterval(() => {
-        setTimeLeft((prev) => prev - 1);
-      }, 1000);
-    } else if (timeLeft === 0) {
-      if (zeroHandledRef.current) return;
-      zeroHandledRef.current = true;
-      if (timerRef.current) clearInterval(timerRef.current);
-      playNotification();
-
-      if (mode === 'work') {
-        const nextSessionCount = sessionsCompleted + 1;
-        setSessionsCompleted(nextSessionCount);
-        logPomodoroSession(format(new Date(), 'yyyy-MM-dd'), pomodoroSettings.workDuration);
-
-        if (nextSessionCount >= pomodoroSettings.maxSessions) {
-          setIsActive(false);
-          notifyPopup('番茄钟完成', '恭喜完成今日所有番茄钟！');
-          return;
-        }
-
-        if (nextSessionCount % pomodoroSettings.longBreakInterval === 0) {
-          notifyPopup('专注结束', '进入长休息，稍后继续保持节奏。');
-          switchMode('longBreak');
-        } else {
-          notifyPopup('专注结束', '短休开始，放松一下。');
-          switchMode('shortBreak');
-        }
-      } else {
-        notifyPopup(mode === 'longBreak' ? '长休结束' : '休息结束', '回到专注，继续下一轮。');
-        switchMode('work');
-      }
-    }
+    window.ipcRenderer.on('pomodoro:state', stateHandler);
+    window.ipcRenderer.on('pomodoro:action', actionHandler);
+    window.ipcRenderer.on('pomodoro:on-complete', completeHandler);
 
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      window.ipcRenderer.off('pomodoro:state', stateHandler);
+      window.ipcRenderer.off('pomodoro:action', actionHandler);
+      window.ipcRenderer.off('pomodoro:on-complete', completeHandler);
     };
-  }, [isActive, timeLeft, mode, sessionsCompleted, pomodoroSettings, switchMode, notifyPopup, playNotification, isFloatingView, logPomodoroSession]);
+  }, [toggleTimer, resetTimer, skipMode, switchMode, dismissPopup, handleModeComplete]);
 
   const value = useMemo(() => ({
-    pomodoroSettings: effectiveSettings,
+    pomodoroSettings,
     updatePomodoroSettings,
     timeLeft,
     isActive,
@@ -297,35 +217,18 @@ export const PomodoroProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     sessionsCompleted,
     toggleTimer,
     resetTimer,
+    skipMode,
     switchMode,
     popup,
     dismissPopup,
-  }), [
-    effectiveSettings,
-    updatePomodoroSettings,
-    timeLeft,
-    isActive,
-    mode,
-    sessionsCompleted,
-    toggleTimer,
-    resetTimer,
-    switchMode,
-    popup,
-    dismissPopup,
-  ]);
+  }), [pomodoroSettings, updatePomodoroSettings, timeLeft, isActive, mode, sessionsCompleted, toggleTimer, resetTimer, skipMode, switchMode, popup, dismissPopup]);
 
-  return (
-    <PomodoroContext.Provider value={value}>
-      {children}
-    </PomodoroContext.Provider>
-  );
+  return <PomodoroContext.Provider value={value}>{children}</PomodoroContext.Provider>;
 };
 
 // eslint-disable-next-line react-refresh/only-export-components
 export const usePomodoro = () => {
   const context = useContext(PomodoroContext);
-  if (!context) {
-    throw new Error('usePomodoro must be used within PomodoroProvider');
-  }
+  if (!context) throw new Error('usePomodoro must be used within PomodoroProvider');
   return context;
 };

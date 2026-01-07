@@ -32,9 +32,77 @@ type PomodoroState = {
 
 let win: BrowserWindow | null
 let floatingWin: BrowserWindow | null
-let pomodoroState: PomodoroState | null = null
 let tray: Tray | null = null
 let isQuitting = false
+
+// --- 主进程番茄钟逻辑 ---
+let pomodoroState: PomodoroState = {
+  timeLeft: 25 * 60,
+  isActive: false,
+  mode: 'work',
+  sessionsCompleted: 0,
+  popup: null,
+  pomodoroSettings: {
+    workDuration: 25,
+    shortBreakDuration: 5,
+    longBreakDuration: 15,
+    longBreakInterval: 4,
+    autoStartBreaks: false,
+    autoStartPomodoros: false,
+    maxSessions: 8,
+  }
+};
+
+let mainTimer: NodeJS.Timeout | null = null;
+
+function formatTime(seconds: number) {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+function updateTrayDisplay() {
+  if (!tray) return;
+  const timeStr = formatTime(pomodoroState.timeLeft);
+  const modeLabel = pomodoroState.mode === 'work' ? '专注' : '休息';
+  const statusStr = pomodoroState.isActive ? `${modeLabel} ${timeStr}` : `已暂停 ${timeStr}`;
+
+  if (process.platform === 'darwin') {
+    // macOS 菜单栏特有：在图标旁显示文字
+    tray.setTitle(pomodoroState.isActive ? ` ${timeStr}` : ''); 
+  }
+  
+  tray.setToolTip(`Daily Planner - ${statusStr}`);
+}
+
+function broadcastState() {
+  const payload = JSON.parse(JSON.stringify(pomodoroState));
+  if (win && !win.isDestroyed()) win.webContents.send('pomodoro:state', payload);
+  if (floatingWin && !floatingWin.isDestroyed()) floatingWin.webContents.send('pomodoro:state', payload);
+  updateTrayDisplay();
+}
+
+function startTimer() {
+  if (mainTimer) clearInterval(mainTimer);
+  mainTimer = setInterval(() => {
+    if (pomodoroState.isActive && pomodoroState.timeLeft > 0) {
+      pomodoroState.timeLeft -= 1;
+      broadcastState();
+    } else if (pomodoroState.timeLeft === 0 && pomodoroState.isActive) {
+      stopTimer();
+      if (win && !win.isDestroyed()) win.webContents.send('pomodoro:on-complete');
+      if (floatingWin && !floatingWin.isDestroyed()) floatingWin.webContents.send('pomodoro:on-complete');
+    }
+  }, 1000);
+}
+
+function stopTimer() {
+  if (mainTimer) {
+    clearInterval(mainTimer);
+    mainTimer = null;
+  }
+  updateTrayDisplay();
+}
 
 const gotTheLock = app.requestSingleInstanceLock()
 
@@ -42,7 +110,6 @@ if (!gotTheLock) {
   app.quit()
 } else {
   app.on('second-instance', () => {
-    // 当运行第二个实例时，焦点聚焦到主窗口
     if (win) {
       if (win.isMinimized()) win.restore()
       win.focus()
@@ -73,24 +140,53 @@ function createTray() {
   if (tray) return
   tray = new Tray(getTrayIcon())
   tray.setToolTip('Daily Planner')
+  
+  const updateMenu = () => {
+    const contextMenu = Menu.buildFromTemplate([
+      { label: '打开主窗口', click: () => showMainWindow() },
+      { type: 'separator' },
+      { label: pomodoroState.isActive ? '暂停番茄钟' : '开始番茄钟', 
+        click: () => {
+          pomodoroState.isActive = !pomodoroState.isActive;
+          if (pomodoroState.isActive) startTimer(); else stopTimer();
+          broadcastState();
+          updateMenu();
+        } 
+      },
+      { label: '重置番茄钟', click: () => {
+          const duration = pomodoroState.mode === 'work' ? pomodoroState.pomodoroSettings.workDuration : pomodoroState.pomodoroSettings.shortBreakDuration;
+          pomodoroState.timeLeft = duration * 60;
+          pomodoroState.isActive = false;
+          stopTimer();
+          broadcastState();
+          updateMenu();
+        } 
+      },
+      { type: 'separator' },
+      { label: '显示/隐藏悬浮球', click: () => {
+          if (floatingWin && floatingWin.isVisible()) floatingWin.hide();
+          else if (floatingWin) floatingWin.show();
+          else createFloatingWindow();
+        }
+      },
+      { type: 'separator' },
+      { label: '退出', click: () => quitApp() },
+    ])
+    tray?.setContextMenu(contextMenu)
+  }
+
   tray.on('click', () => {
     showMainWindow()
   })
-  const contextMenu = Menu.buildFromTemplate([
-    { label: '打开主窗口', click: () => showMainWindow() },
-    { label: '退出', click: () => quitApp() },
-  ])
-  tray.setContextMenu(contextMenu)
+  
+  updateMenu();
 }
 
 function quitApp() {
   isQuitting = true
-  if (floatingWin && !floatingWin.isDestroyed()) {
-    floatingWin.destroy()
-  }
-  if (win && !win.isDestroyed()) {
-    win.destroy()
-  }
+  stopTimer();
+  if (floatingWin && !floatingWin.isDestroyed()) floatingWin.destroy()
+  if (win && !win.isDestroyed()) win.destroy()
   app.quit()
 }
 
@@ -107,19 +203,17 @@ function createWindow() {
     height: 800,
     title: 'Daily Planner',
     autoHideMenuBar: true,
-    frame: false, // 移除系统默认边框
-    transparent: true, // 开启透明窗口支持
-    backgroundColor: '#00000000', // 设置背景完全透明
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
       nodeIntegration: false,
       contextIsolation: true,
       backgroundThrottling: false,
-      webSecurity: false, // 允许跨域请求，解决 CalDAV 连接问题
+      webSecurity: false,
     },
-    ...(process.platform === 'darwin'
-      ? { titleBarStyle: 'hiddenInset' }
-      : {}),
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' } : {}),
   }
   win = new BrowserWindow(windowOptions)
 
@@ -129,32 +223,12 @@ function createWindow() {
     win.loadFile(path.join(RENDERER_DIST, 'index.html'))
   }
 
-  win.setMenuBarVisibility(false)
-
-  // 关键修复：确保窗口加载后输入法能正常唤起
   win.webContents.on('dom-ready', () => {
     win?.focus();
-    win?.webContents.focus();
+    broadcastState();
   });
 
-  // 拦截百度网盘 API 请求，强制修改 Referer 以绕过限制
-  // 注意：生产环境如果使用 file:// 协议，这里必须伪造一个 http 的 Referer
-  // 请确保百度开放平台后台的“根域名绑定”和“授权回调页”也配置了相同的域名（如 localhost:5173）
-  win.webContents.session.webRequest.onBeforeSendHeaders(
-    { urls: ['*://openapi.baidu.com/*', '*://pan.baidu.com/*', '*://pcs.baidu.com/*'] },
-    (details, callback) => {
-      // 强制设置 Referer 为授权回调页的域名
-      details.requestHeaders['Referer'] = 'http://localhost:5173';
-      // 有些接口可能还需要 Origin
-      details.requestHeaders['Origin'] = 'http://localhost:5173';
-      callback({ requestHeaders: details.requestHeaders });
-    }
-  );
-
-  win.on('closed', () => {
-    win = null;
-  });
-
+  win.on('closed', () => { win = null; });
   win.on('close', (event) => {
     if (isQuitting) return
     event.preventDefault()
@@ -162,26 +236,8 @@ function createWindow() {
   })
 }
 
-// ... existing createFloatingWindow ...
-
-ipcMain.on('app:quit', () => {
-  quitApp()
-})
-
-ipcMain.on('app:minimize-to-tray', () => {
-  if (win && !win.isDestroyed()) {
-    createTray()
-    win.hide()
-    if (process.platform === 'darwin') {
-      app.dock?.hide()
-    }
-  }
-})
-
 function createFloatingWindow() {
-  if (floatingWin && !floatingWin.isDestroyed()) {
-    return;
-  }
+  if (floatingWin && !floatingWin.isDestroyed()) return;
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   floatingWin = new BrowserWindow({
     icon: path.join(process.env.VITE_PUBLIC, 'electron-vite.svg'),
@@ -213,29 +269,33 @@ function createFloatingWindow() {
     floatingWin.loadFile(path.join(RENDERER_DIST, 'index.html'), { query: { view: 'floating' } });
   }
 
-  floatingWin.on('closed', () => {
-    floatingWin = null;
+  floatingWin.webContents.on('dom-ready', () => {
+    broadcastState();
   });
+
+  floatingWin.on('closed', () => { floatingWin = null; });
 }
 
-// Log handler
-ipcMain.on('log-message', (_event, message) => {
-  console.log(message);
-});
-
-ipcMain.on('pomodoro:state', (_event, state: PomodoroState) => {
-  pomodoroState = state;
-  if (floatingWin && !floatingWin.isDestroyed()) {
-    floatingWin.webContents.send('pomodoro:state', state);
+// IPC Handlers
+ipcMain.on('app:quit', () => { quitApp() })
+ipcMain.on('app:minimize-to-tray', () => {
+  if (win) {
+    win.hide();
+    if (process.platform === 'darwin') app.dock?.hide();
   }
+})
+
+ipcMain.on('pomodoro:sync-state', (_event, newState: PomodoroState) => {
+  pomodoroState = newState;
+  if (pomodoroState.isActive) startTimer(); else stopTimer();
+  broadcastState();
 });
 
 ipcMain.handle('pomodoro:getState', () => pomodoroState);
 
 ipcMain.on('pomodoro:action', (_event, action) => {
-  if (win && !win.isDestroyed()) {
-    win.webContents.send('pomodoro:action', action);
-  }
+  if (win && !win.isDestroyed()) win.webContents.send('pomodoro:action', action);
+  if (floatingWin && !floatingWin.isDestroyed()) floatingWin.webContents.send('pomodoro:action', action);
 });
 
 ipcMain.on('app:open-tab', (_event, tab) => {
@@ -248,104 +308,46 @@ ipcMain.on('app:open-tab', (_event, tab) => {
 
 ipcMain.on('window-control', (_event, action: 'minimize' | 'maximize' | 'close') => {
   if (!win || win.isDestroyed()) return;
-  if (action === 'minimize') {
-    win.minimize();
-  } else if (action === 'maximize') {
-    if (win.isMaximized()) {
-      win.unmaximize();
-    } else {
-      win.maximize();
-    }
-  } else if (action === 'close') {
-    win.close();
-  }
+  if (action === 'minimize') win.minimize();
+  else if (action === 'maximize') win.isMaximized() ? win.unmaximize() : win.maximize();
+  else if (action === 'close') win.close();
 });
 
 ipcMain.handle('floating:getPosition', () => {
-  if (!floatingWin || floatingWin.isDestroyed()) return { x: 0, y: 0 };
+  if (!floatingWin) return { x: 0, y: 0 };
   const [x, y] = floatingWin.getPosition();
   return { x, y };
 });
 
-ipcMain.on('floating:setPosition', (_event, position: { x: number; y: number }) => {
-  if (!floatingWin || floatingWin.isDestroyed()) return;
-  const display = screen.getDisplayMatching({
-    x: position.x,
-    y: position.y,
-    width: floatingWin.getBounds().width,
-    height: floatingWin.getBounds().height,
-  });
-  const maxX = display.workArea.x + Math.max(0, display.workArea.width - floatingWin.getBounds().width);
-  const maxY = display.workArea.y + Math.max(0, display.workArea.height - floatingWin.getBounds().height);
-  const nextX = Math.min(Math.max(position.x, display.workArea.x), maxX);
-  const nextY = Math.min(Math.max(position.y, display.workArea.y), maxY);
-  floatingWin.setPosition(nextX, nextY);
+ipcMain.on('floating:setPosition', (_event, pos) => {
+  if (floatingWin) floatingWin.setPosition(pos.x, pos.y);
 });
 
-ipcMain.handle('floating:getAlwaysOnTop', () => {
-  if (!floatingWin || floatingWin.isDestroyed()) return false;
-  return floatingWin.isAlwaysOnTop();
+ipcMain.handle('floating:getAlwaysOnTop', () => floatingWin?.isAlwaysOnTop() || false);
+ipcMain.handle('floating:setAlwaysOnTop', (_event, enabled) => {
+  floatingWin?.setAlwaysOnTop(enabled, 'floating');
+  return enabled;
 });
 
-ipcMain.handle('floating:setAlwaysOnTop', (_event, enabled: boolean) => {
-  if (!floatingWin || floatingWin.isDestroyed()) return false;
-  floatingWin.setAlwaysOnTop(Boolean(enabled), 'floating');
-  return floatingWin.isAlwaysOnTop();
-});
-
-ipcMain.on('floating:toggle', () => {
-  if (!floatingWin || floatingWin.isDestroyed()) {
-    createFloatingWindow();
-    return;
-  }
-  if (floatingWin.isVisible()) {
-    floatingWin.hide();
-  } else {
-    floatingWin.show();
-  }
-});
-
-ipcMain.on('floating:hide', () => {
-  if (floatingWin && !floatingWin.isDestroyed()) {
-    floatingWin.hide();
-  }
-});
-
+ipcMain.on('floating:hide', () => { floatingWin?.hide(); });
 ipcMain.on('floating:show', () => {
-  if (!floatingWin || floatingWin.isDestroyed()) {
-    createFloatingWindow();
-  } else {
-    floatingWin.show();
-  }
+  if (!floatingWin) createFloatingWindow();
+  else floatingWin.show();
 });
 
-// 保留媒体键处理禁用，避免影响输入法相关特性
 app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling');
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit()
-    win = null
-    floatingWin = null
-  }
+  if (process.platform !== 'darwin') quitApp();
 })
 
 app.on('activate', () => {
-  if (!win || win.isDestroyed()) {
-    createWindow()
-  } else {
-    showMainWindow()
-  }
-  if (!floatingWin || floatingWin.isDestroyed()) {
-    createFloatingWindow()
-  }
+  if (!win) createWindow();
 })
 
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null)
-  app.on('before-quit', () => {
-    isQuitting = true
-  })
+  createTray()
   createWindow()
   createFloatingWindow()
 })
