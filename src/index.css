@@ -26,8 +26,9 @@
     /* 移除所有可能导致 IME 问题的特殊属性 */
     -webkit-user-select: auto;
     user-select: auto;
-    background: var(--app-bg);
+    background: transparent; /* 改为透明 */
     color: var(--color-ink);
+    overflow: hidden; /* 防止出现双滚动条 */
   }
 
   input, textarea, [contenteditable="true"] {
@@ -37,6 +38,14 @@
     /* 绝对不能有 drag 属性 */
     -webkit-app-region: no-drag !important;
   }
+}
+
+.drag-region {
+  -webkit-app-region: drag;
+}
+
+.no-drag {
+  -webkit-app-region: no-drag;
 }
 
 /* 核心布局，确保不会由于容器问题截断输入法 */

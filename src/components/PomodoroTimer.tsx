@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Play, Pause, RotateCcw, Settings as SettingsIcon } from 'lucide-react';
+import { Play, Pause, RotateCcw, Settings as SettingsIcon, Monitor } from 'lucide-react';
 import { usePomodoro } from '../contexts/PomodoroContext';
 import { cn } from '../utils/cn';
 
@@ -16,11 +16,25 @@ const PomodoroTimer: React.FC = () => {
   } = usePomodoro();
   const [showSettings, setShowSettings] = useState(false);
 
+  const toggleFloatingWindow = () => {
+    if (typeof window !== 'undefined' && window.ipcRenderer) {
+      window.ipcRenderer.send('floating:toggle');
+    }
+  };
+
   const minutes = Math.floor(timeLeft / 60);
   const seconds = timeLeft % 60;
 
   return (
     <div className="flex flex-col items-center justify-center h-full space-y-8 relative">
+      <button 
+        onClick={toggleFloatingWindow}
+        className="absolute top-0 left-0 p-2 text-slate-400 hover:text-primary transition-colors"
+        title="显示/隐藏悬浮球"
+      >
+        <Monitor size={24} />
+      </button>
+
       <button 
         onClick={() => setShowSettings(!showSettings)}
         className="absolute top-0 right-0 p-2 text-slate-400 hover:text-primary transition-colors"

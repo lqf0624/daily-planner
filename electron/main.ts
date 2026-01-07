@@ -36,6 +36,20 @@ let pomodoroState: PomodoroState | null = null
 let tray: Tray | null = null
 let isQuitting = false
 
+const gotTheLock = app.requestSingleInstanceLock()
+
+if (!gotTheLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    // 当运行第二个实例时，焦点聚焦到主窗口
+    if (win) {
+      if (win.isMinimized()) win.restore()
+      win.focus()
+    }
+  })
+}
+
 function showMainWindow() {
   if (!win || win.isDestroyed()) {
     createWindow()
@@ -81,12 +95,21 @@ function quitApp() {
 }
 
 function createWindow() {
+  if (win && !win.isDestroyed()) {
+    win.show()
+    win.focus()
+    return
+  }
+
   const windowOptions: BrowserWindowConstructorOptions = {
     icon: path.join(process.env.VITE_PUBLIC, 'electron-vite.svg'),
     width: 1200,
     height: 800,
     title: 'Daily Planner',
     autoHideMenuBar: true,
+    frame: false, // 移除系统默认边框
+    transparent: true, // 开启透明窗口支持
+    backgroundColor: '#00000000', // 设置背景完全透明
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
       nodeIntegration: false,
@@ -96,9 +119,6 @@ function createWindow() {
     },
     ...(process.platform === 'darwin'
       ? { titleBarStyle: 'hiddenInset' }
-      : {}),
-    ...(process.platform === 'win32'
-      ? { titleBarOverlay: { color: '#f6f2ec', symbolColor: '#0f172a', height: 34 } }
       : {}),
   }
   win = new BrowserWindow(windowOptions)
@@ -135,33 +155,33 @@ function createWindow() {
     win = null;
   });
 
-  win.on('close', async (event) => {
+  win.on('close', (event) => {
     if (isQuitting) return
     event.preventDefault()
-    const result = await dialog.showMessageBox(win!, {
-      type: 'question',
-      buttons: ['最小化到托盘', '退出', '取消'],
-      defaultId: 0,
-      cancelId: 2,
-      message: '关闭 Daily Planner？',
-      detail: '最小化到托盘将继续计时，退出会关闭悬浮球并停止计时。',
-    })
-    if (result.response === 0) {
-      createTray()
-      win?.hide()
-      if (process.platform === 'darwin') {
-        app.dock?.hide()
-      }
-      return
-    }
-    if (result.response === 1) {
-      quitApp()
-    }
+    win?.webContents.send('app:request-close')
   })
 }
 
+// ... existing createFloatingWindow ...
+
+ipcMain.on('app:quit', () => {
+  quitApp()
+})
+
+ipcMain.on('app:minimize-to-tray', () => {
+  if (win && !win.isDestroyed()) {
+    createTray()
+    win.hide()
+    if (process.platform === 'darwin') {
+      app.dock?.hide()
+    }
+  }
+})
+
 function createFloatingWindow() {
-  if (floatingWin) return;
+  if (floatingWin && !floatingWin.isDestroyed()) {
+    return;
+  }
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   floatingWin = new BrowserWindow({
     icon: path.join(process.env.VITE_PUBLIC, 'electron-vite.svg'),
@@ -226,6 +246,21 @@ ipcMain.on('app:open-tab', (_event, tab) => {
   }
 });
 
+ipcMain.on('window-control', (_event, action: 'minimize' | 'maximize' | 'close') => {
+  if (!win || win.isDestroyed()) return;
+  if (action === 'minimize') {
+    win.minimize();
+  } else if (action === 'maximize') {
+    if (win.isMaximized()) {
+      win.unmaximize();
+    } else {
+      win.maximize();
+    }
+  } else if (action === 'close') {
+    win.close();
+  }
+});
+
 ipcMain.handle('floating:getPosition', () => {
   if (!floatingWin || floatingWin.isDestroyed()) return { x: 0, y: 0 };
   const [x, y] = floatingWin.getPosition();
@@ -256,6 +291,32 @@ ipcMain.handle('floating:setAlwaysOnTop', (_event, enabled: boolean) => {
   if (!floatingWin || floatingWin.isDestroyed()) return false;
   floatingWin.setAlwaysOnTop(Boolean(enabled), 'floating');
   return floatingWin.isAlwaysOnTop();
+});
+
+ipcMain.on('floating:toggle', () => {
+  if (!floatingWin || floatingWin.isDestroyed()) {
+    createFloatingWindow();
+    return;
+  }
+  if (floatingWin.isVisible()) {
+    floatingWin.hide();
+  } else {
+    floatingWin.show();
+  }
+});
+
+ipcMain.on('floating:hide', () => {
+  if (floatingWin && !floatingWin.isDestroyed()) {
+    floatingWin.hide();
+  }
+});
+
+ipcMain.on('floating:show', () => {
+  if (!floatingWin || floatingWin.isDestroyed()) {
+    createFloatingWindow();
+  } else {
+    floatingWin.show();
+  }
 });
 
 // 保留媒体键处理禁用，避免影响输入法相关特性

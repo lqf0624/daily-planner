@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useMemo, useRef, useStat
 import { format } from 'date-fns';
 import { useAppStore } from '../stores/useAppStore';
 import { PomodoroSettings } from '../types';
+import { showToast } from '../utils/events';
 
 export type PomodoroMode = 'work' | 'shortBreak' | 'longBreak';
 
@@ -57,6 +58,7 @@ export const PomodoroProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const startAudioRef = useRef<HTMLAudioElement | null>(null);
   const lastResetDateRef = useRef<string>(format(new Date(), 'yyyy-MM-dd'));
   const zeroHandledRef = useRef(false);
 
@@ -69,7 +71,8 @@ export const PomodoroProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   useEffect(() => {
     if (isFloatingView) return;
-    audioRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+    audioRef.current = new Audio('/sounds/complete.mp3');
+    startAudioRef.current = new Audio('/sounds/start.mp3');
   }, [isFloatingView]);
 
   useEffect(() => {
@@ -96,16 +99,28 @@ export const PomodoroProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const playNotification = useCallback(() => {
     if (isFloatingView) return;
     if (audioRef.current) {
-      audioRef.current.play().catch((e) => console.log('Audio play failed', e));
+      audioRef.current.currentTime = 0;
+      audioRef.current.play().catch((e) => console.log('Complete audio play failed', e));
+    }
+  }, [isFloatingView]);
+
+  const playStartSound = useCallback(() => {
+    if (isFloatingView) return;
+    if (startAudioRef.current) {
+      startAudioRef.current.currentTime = 0;
+      startAudioRef.current.play().catch((e) => console.log('Start audio play failed', e));
     }
   }, [isFloatingView]);
 
   const notifyPopup = useCallback((title: string, message: string) => {
     setPopup({ title, message });
-    if (isFloatingView) return;
-    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-      new Notification(title, { body: message });
+    if (isFloatingView) {
+      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+        new Notification(title, { body: message });
+      }
+      return;
     }
+    showToast(title, message, 'system');
   }, [isFloatingView]);
 
   const dismissPopup = useCallback(() => {
@@ -150,8 +165,11 @@ export const PomodoroProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       sendAction({ type: 'toggle' });
       return;
     }
-    setIsActive((prev) => !prev);
-  }, [isFloatingView, sendAction]);
+    setIsActive((prev) => {
+      if (!prev) playStartSound();
+      return !prev;
+    });
+  }, [isFloatingView, sendAction, playStartSound]);
 
   const updatePomodoroSettings = useCallback((settings: Partial<PomodoroSettings>) => {
     if (isFloatingView) {

@@ -14,10 +14,19 @@ import {
   Activity,
   ListTodo,
   CheckCircle2,
-  BarChart3
+  BarChart3,
+  Minus,
+  Square,
+  X as CloseIcon,
+  Zap,
+  Coffee,
+  AlertCircle,
+  LogOut,
+  ArrowDownToLine
 } from 'lucide-react';
 import { cn } from './utils/cn';
-import { getDay, format, parseISO, differenceInMinutes, addMinutes, setHours, setMinutes, getISOWeek, getISOWeekYear, subWeeks } from 'date-fns';
+import { getDay, format, parseISO, differenceInMinutes, addMinutes, setHours, setMinutes, getISOWeek, getISOWeekYear, subWeeks, isWithinInterval } from 'date-fns';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore } from './stores/useAppStore';
 import { Task } from './types';
 
@@ -50,20 +59,175 @@ const resolveTaskDateTime = (task: Task, timeValue?: string) => {
   return parsed;
 };
 
+const WindowControls = () => {
+  const handleControl = (action: 'minimize' | 'maximize' | 'close') => {
+    window.ipcRenderer.send('window-control', action);
+  };
+
+  return (
+    <div className="absolute top-0 right-0 flex items-center gap-0 z-[100] no-drag pr-2 pt-1">
+      <button 
+        onClick={() => handleControl('minimize')} 
+        className="p-2 text-slate-400 hover:bg-slate-200/50 hover:text-slate-600 transition-colors rounded-full"
+        title="最小化"
+      >
+        <Minus size={14} />
+      </button>
+      <button 
+        onClick={() => handleControl('maximize')} 
+        className="p-2 text-slate-400 hover:bg-slate-200/50 hover:text-slate-600 transition-colors rounded-full"
+        title="最大化"
+      >
+        <Square size={12} />
+      </button>
+      <button 
+        onClick={() => handleControl('close')} 
+        className="p-2 text-slate-400 hover:bg-red-500/10 hover:text-red-500 transition-colors rounded-full"
+        title="关闭"
+      >
+        <CloseIcon size={14} />
+      </button>
+    </div>
+  );
+};
+
+const CloseConfirmationModal = ({ isOpen, onClose, onConfirmExit, onConfirmMinimize }: any) => {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/20 backdrop-blur-sm no-drag">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        className="bg-white/95 border border-white/60 shadow-2xl rounded-[32px] p-8 w-full max-w-sm backdrop-blur-2xl"
+      >
+        <div className="flex flex-col items-center text-center gap-6">
+          <div className="p-5 bg-amber-50 text-amber-500 rounded-3xl mb-2 ring-1 ring-amber-100">
+            <AlertCircle size={36} />
+          </div>
+          <div className="space-y-2">
+            <h3 className="text-xl font-bold text-slate-800 font-display">确认关闭？</h3>
+            <p className="text-sm text-slate-500 leading-relaxed">
+              最小化到托盘可以让计时器和悬浮窗继续运行。<br/>退出将完全关闭应用。
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-3 w-full">
+            <button
+              onClick={onConfirmMinimize}
+              className="flex items-center justify-center gap-2 py-3.5 px-4 bg-primary text-white rounded-2xl font-bold hover:bg-primary-dark transition-all active:scale-95 shadow-lg shadow-primary/20"
+            >
+              <ArrowDownToLine size={18} />
+              最小化
+            </button>
+            <button
+              onClick={onConfirmExit}
+              className="flex items-center justify-center gap-2 py-3.5 px-4 bg-slate-100 text-slate-600 rounded-2xl font-bold hover:bg-slate-200 transition-all active:scale-95 hover:text-red-500"
+            >
+              <LogOut size={18} />
+              退出
+            </button>
+          </div>
+          <button onClick={onClose} className="text-xs font-medium text-slate-400 hover:text-slate-600 transition-colors py-1">
+            取消
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
+type ToastType = {
+  id: string;
+  title: string;
+  message: string;
+  kind: 'habit' | 'task' | 'system';
+};
+
+const ToastContainer = ({ toasts, removeToast }: { toasts: ToastType[], removeToast: (id: string) => void }) => {
+  return (
+    <div className="fixed top-24 right-8 z-[150] flex flex-col gap-3 pointer-events-none">
+      <AnimatePresence>
+        {toasts.map(toast => (
+          <motion.div
+            key={toast.id}
+            initial={{ opacity: 0, x: 20, scale: 0.9 }}
+            animate={{ opacity: 1, x: 0, scale: 1 }}
+            exit={{ opacity: 0, x: 20, scale: 0.9 }}
+            className="pointer-events-auto bg-white/80 border border-white/60 shadow-xl shadow-slate-200/50 backdrop-blur-xl p-4 rounded-2xl w-80 flex gap-4 items-start"
+          >
+            <div className={cn("p-2.5 rounded-xl shrink-0 text-white shadow-lg", toast.kind === 'task' ? "bg-primary shadow-primary/20" : toast.kind === 'habit' ? "bg-secondary shadow-secondary/20" : "bg-slate-500")}>
+              <Bell size={18} />
+            </div>
+            <div className="flex-1 min-w-0 pt-0.5">
+              <h4 className="font-bold text-sm text-slate-800">{toast.title}</h4>
+              <p className="text-xs text-slate-500 mt-1 leading-relaxed break-words">{toast.message}</p>
+            </div>
+            <button onClick={() => removeToast(toast.id)} className="text-slate-400 hover:text-slate-600 -mt-1 -mr-1 p-1">
+              <CloseIcon size={14} />
+            </button>
+          </motion.div>
+        ))}
+      </AnimatePresence>
+    </div>
+  );
+};
+
 function App() {
   const { weeklyPlans, habits, tasks, toggleHabitCompletion, updateTask, _hasHydrated } = useAppStore();
   const [activeTab, setActiveTab] = useState('planner');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [notification, setNotification] = useState<AppNotification | null>(null);
+  const [closeModalOpen, setCloseModalOpen] = useState(false);
+  const [toasts, setToasts] = useState<ToastType[]>([]);
+  const [notification, setNotification] = useState<AppNotification | null>(null); // Keep for compatibility if needed, but we rely on toasts now
   const lastTaskReminderRef = useRef<Record<string, string>>({});
   const [clockTick, setClockTick] = useState(Date.now());
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.ipcRenderer) return;
+    const handler = () => setCloseModalOpen(true);
+    window.ipcRenderer.on('app:request-close', handler);
+    return () => {
+      window.ipcRenderer.off('app:request-close', handler);
+    };
+  }, []);
+
   const pushNotification = useCallback((payload: AppNotification) => {
-    setNotification(payload);
-    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-      new Notification(payload.title, { body: payload.message });
+    if (document.hasFocus()) {
+      const id = Date.now().toString() + Math.random();
+      // @ts-ignore
+      setToasts(prev => [...prev, { id, ...payload }]);
+      setTimeout(() => {
+        setToasts(prev => prev.filter(t => t.id !== id));
+      }, 6000);
+    } else {
+      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+        new Notification(payload.title, { body: payload.message });
+      }
     }
   }, []);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      pushNotification(detail);
+    };
+    window.addEventListener('app-toast', handler);
+    return () => window.removeEventListener('app-toast', handler);
+  }, [pushNotification]);
+
+  const handleCloseConfirm = (action: 'minimize' | 'exit') => {
+    if (action === 'minimize') {
+      window.ipcRenderer.send('app:minimize-to-tray');
+    } else {
+      window.ipcRenderer.send('app:quit');
+    }
+    setCloseModalOpen(false);
+  };
+
+  const removeToast = (id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  };
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.ipcRenderer) return;
@@ -107,6 +271,36 @@ function App() {
       hoursPlanned: Math.round((scheduledMinutes / 60) * 10) / 10,
     };
   }, [tasks]);
+
+  const currentTaskInfo = useMemo(() => {
+    const now = new Date(clockTick);
+    const todayStr = format(now, 'yyyy-MM-dd');
+    
+    const timedTasks = tasks.filter(t => 
+      t.date === todayStr && 
+      !t.isCompleted && 
+      t.hasTime && 
+      t.startTime
+    );
+
+    const active = timedTasks.find(t => {
+      const start = resolveTaskDateTime(t, t.startTime);
+      if (!start) return false;
+      const end = resolveTaskDateTime(t, t.endTime) ?? addMinutes(start, 60);
+      return isWithinInterval(now, { start, end });
+    });
+
+    if (active) return { task: active, status: 'now' as const };
+
+    const next = timedTasks
+      .map(t => ({ task: t, start: resolveTaskDateTime(t, t.startTime) }))
+      .filter(item => item.start && item.start > now)
+      .sort((a, b) => a.start!.getTime() - b.start!.getTime())[0];
+
+    if (next) return { task: next.task, status: 'next' as const, startTime: next.start };
+
+    return null;
+  }, [tasks, clockTick]);
 
   // System Time Checks
   useEffect(() => {
@@ -212,7 +406,18 @@ function App() {
   };
 
   return (
-      <div className="relative flex h-screen w-screen overflow-hidden text-slate-900">
+      <div 
+        className="relative flex h-screen w-screen overflow-hidden text-slate-900 drag-region rounded-[32px] border border-white/40 shadow-2xl"
+        style={{ background: 'var(--app-bg)' }}
+      >
+        <WindowControls />
+        <CloseConfirmationModal 
+          isOpen={closeModalOpen} 
+          onClose={() => setCloseModalOpen(false)}
+          onConfirmMinimize={() => handleCloseConfirm('minimize')}
+          onConfirmExit={() => handleCloseConfirm('exit')}
+        />
+        <ToastContainer toasts={toasts} removeToast={removeToast} />
         <div className="pointer-events-none absolute inset-0">
           <div className="absolute -top-20 -right-10 h-72 w-72 rounded-full bg-primary/20 blur-3xl animate-[floatPulse_14s_ease-in-out_infinite]" />
           <div className="absolute bottom-10 left-6 h-80 w-80 rounded-full bg-secondary/20 blur-3xl animate-[floatPulse_16s_ease-in-out_infinite]" />
@@ -221,7 +426,7 @@ function App() {
 
         <div className="relative flex h-full w-full gap-6 p-6">
         {/* Sidebar */}
-        <aside className={cn("bg-white/80 border border-white/60 backdrop-blur-xl transition-all duration-300 flex flex-col shrink-0 rounded-[28px] shadow-[var(--shadow-card)]", sidebarCollapsed ? "w-16" : "w-64")}>
+        <aside className={cn("bg-white/80 border border-white/60 backdrop-blur-xl transition-all duration-300 flex flex-col shrink-0 rounded-[28px] shadow-[var(--shadow-card)] no-drag", sidebarCollapsed ? "w-16" : "w-64")}>
           <div className="p-4 flex items-center justify-between border-b border-slate-100/60">
             {!sidebarCollapsed && (
               <div className="space-y-1">
@@ -252,12 +457,46 @@ function App() {
         </aside>
 
         {/* Main Content */}
-        <main className="flex-1 min-w-0 flex flex-col overflow-hidden relative">
+        <main className="flex-1 min-w-0 flex flex-col overflow-hidden relative no-drag">
           <header className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between shrink-0">
-            <div className="space-y-2">
-              <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Today Focus</p>
-              <h2 className="text-3xl font-bold text-slate-800">{menuItems.find(i => i.id === activeTab)?.label}</h2>
-              <p className="text-slate-500">{format(new Date(), 'yyyy年MM月dd日 EEEE')}</p>
+            <div className="space-y-4 min-w-[300px]">
+              <div className="space-y-2">
+                <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Today Focus</p>
+                <h2 className="text-3xl font-bold text-slate-800">{menuItems.find(i => i.id === activeTab)?.label}</h2>
+                <p className="text-slate-500">{format(new Date(), 'yyyy年MM月dd日 EEEE')}</p>
+              </div>
+
+              {/* Current Task Card */}
+              <div className="bg-white/60 border border-white/60 rounded-xl p-3 shadow-sm backdrop-blur-md max-w-md animate-in fade-in slide-in-from-left-4">
+                {currentTaskInfo ? (
+                  <div className="flex items-start gap-3">
+                    <div className={cn("p-2 rounded-lg shrink-0", currentTaskInfo.status === 'now' ? "bg-amber-100 text-amber-600" : "bg-blue-100 text-blue-600")}>
+                      {currentTaskInfo.status === 'now' ? <Zap size={20} className="fill-current" /> : <Clock size={20} />}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={cn("text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded", currentTaskInfo.status === 'now' ? "bg-amber-200/50 text-amber-700" : "bg-blue-200/50 text-blue-700")}>
+                          {currentTaskInfo.status === 'now' ? '进行中' : '接下来'}
+                        </span>
+                        {currentTaskInfo.status === 'next' && currentTaskInfo.startTime && (
+                          <span className="text-xs text-slate-500">{format(currentTaskInfo.startTime, 'HH:mm')}</span>
+                        )}
+                      </div>
+                      <h3 className="font-bold text-slate-800 line-clamp-1">{currentTaskInfo.task.title}</h3>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3 text-slate-500">
+                    <div className="p-2 bg-slate-100 rounded-lg shrink-0">
+                      <Coffee size={20} />
+                    </div>
+                    <div>
+                      <h3 className="font-medium text-sm">当前时段没有安排</h3>
+                      <p className="text-xs opacity-70">看看要做什么吧</p>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 w-full lg:w-auto">
               <div className="bg-white/80 border border-white/60 rounded-2xl p-4 shadow-[var(--shadow-soft)] backdrop-blur-xl">
@@ -279,32 +518,6 @@ function App() {
                 <div className="text-2xl font-bold text-secondary mt-2">{todayStats.hoursPlanned}h</div>
               </div>
             </div>
-            {notification && (
-              <div className="flex items-center gap-3 bg-white/90 border border-white/60 p-4 rounded-2xl shadow-2xl absolute right-8 top-8 z-50 max-w-sm backdrop-blur-xl animate-[fadeRise_0.4s_ease]">
-                <div className="p-2 bg-primary text-white rounded-xl shrink-0"><Bell size={18} /></div>
-                <div className="flex-1 min-w-0">
-                  <h4 className="font-bold text-sm text-primary">{notification.title}</h4>
-                  <p className="text-xs text-slate-600 break-words">{notification.message}</p>
-                </div>
-                <div className="flex flex-col gap-1">
-                   {notification.kind === 'habit' && (
-                     <button onClick={handleNotificationAction} className="text-xs bg-primary text-white px-2 py-1 rounded-lg hover:bg-primary-dark whitespace-nowrap">打卡</button>
-                   )}
-                   {notification.kind === 'task' && (
-                     <>
-                       <button onClick={handleNotificationAction} className="text-xs bg-primary text-white px-2 py-1 rounded-lg hover:bg-primary-dark whitespace-nowrap">完成</button>
-                       <button onClick={() => { setActiveTab('planner'); setNotification(null); }} className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 whitespace-nowrap">查看</button>
-                     </>
-                   )}
-                   {notification.kind === 'system' && (
-                     <button onClick={() => setNotification(null)} className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 whitespace-nowrap">知道了</button>
-                   )}
-                   {notification.kind === 'habit' && (
-                     <button onClick={() => setNotification(null)} className="text-xs text-slate-400 hover:text-slate-600 px-2 py-1 whitespace-nowrap">关闭</button>
-                   )}
-                </div>
-              </div>
-            )}
           </header>
           {(shouldShowPlanReminder || shouldShowReviewReminder) && (
             <div className="mb-6 space-y-3">

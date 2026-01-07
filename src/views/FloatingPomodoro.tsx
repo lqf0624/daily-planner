@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Pause, Pin, PinOff, Play, RotateCcw, SquareArrowOutUpRight, X } from 'lucide-react';
+import { Pause, Pin, PinOff, Play, RotateCcw, SquareArrowOutUpRight, X, EyeOff } from 'lucide-react';
 import { usePomodoro } from '../contexts/PomodoroContext';
 import { cn } from '../utils/cn';
 
@@ -40,6 +40,11 @@ const FloatingPomodoro: React.FC = () => {
   const handleOpenMain = () => {
     if (typeof window === 'undefined' || !window.ipcRenderer) return;
     window.ipcRenderer.send('app:open-tab', 'pomodoro');
+  };
+
+  const handleHide = () => {
+    if (typeof window === 'undefined' || !window.ipcRenderer) return;
+    window.ipcRenderer.send('floating:hide');
   };
 
   const handlePointerDown = async (event: React.PointerEvent<HTMLDivElement>) => {
@@ -148,16 +153,25 @@ const FloatingPomodoro: React.FC = () => {
                 {modeLabel}
               </span>
             </div>
-            <button
-              onClick={handleTogglePin}
-              className={cn(
-                "rounded-xl border px-2 py-1 text-slate-500 hover:bg-white/70",
-                alwaysOnTop ? "border-primary/30 text-primary" : "border-white/60"
-              )}
-              title={alwaysOnTop ? '取消置顶' : '置顶'}
-            >
-              {alwaysOnTop ? <Pin size={14} /> : <PinOff size={14} />}
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={handleHide}
+                className="rounded-xl border border-white/60 px-2 py-1 text-slate-500 hover:bg-white/70 hover:text-slate-800 transition-colors"
+                title="隐藏悬浮球"
+              >
+                <EyeOff size={14} />
+              </button>
+              <button
+                onClick={handleTogglePin}
+                className={cn(
+                  "rounded-xl border px-2 py-1 text-slate-500 hover:bg-white/70 transition-colors",
+                  alwaysOnTop ? "border-primary/30 text-primary" : "border-white/60"
+                )}
+                title={alwaysOnTop ? '取消置顶' : '置顶'}
+              >
+                {alwaysOnTop ? <Pin size={14} /> : <PinOff size={14} />}
+              </button>
+            </div>
           </div>
 
           <div

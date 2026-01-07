@@ -95,3 +95,10 @@ export interface Habit {
   completedDates: string[]; // ["2023-01-01", "2023-01-02"]
   createdAt: string;
 }
+
+export interface Toast {
+  id: string;
+  title: string;
+  message: string;
+  kind: 'habit' | 'task' | 'system';
+}
