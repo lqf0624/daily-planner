@@ -46,6 +46,18 @@ body {
   font-family: "Manrope", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
+html.floating-view,
+body.floating-view {
+  background: transparent;
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+body.floating-view #root {
+  height: 100vh;
+  background: transparent;
+}
+
 h1, h2, h3, h4 {
   font-family: "ZCOOL XiaoWei", "Noto Serif SC", "STSong", serif;
 }

@@ -1,10 +1,10 @@
 import React from 'react';
 import { BarChart, CheckCircle2, Clock, Sparkles } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
-import { isAfter, subDays, parseISO, getISOWeek, getISOWeekYear, subWeeks, endOfISOWeek, format, getDay, startOfISOWeekYear, addWeeks } from 'date-fns';
+import { isAfter, subDays, parseISO, getISOWeek, getISOWeekYear, subWeeks, endOfISOWeek, format, getDay, startOfISOWeekYear, addWeeks, startOfDay, endOfDay, isWithinInterval } from 'date-fns';
 
 const WeeklyReport: React.FC = () => {
-  const { tasks, weeklyPlans, updateWeeklyPlan } = useAppStore();
+  const { tasks, weeklyPlans, updateWeeklyPlan, pomodoroHistory } = useAppStore();
   const lastWeekTasks = tasks.filter(t => isAfter(parseISO(t.createdAt), subDays(new Date(), 7)));
   const now = new Date();
   const currentWeek = getISOWeek(now);
@@ -31,6 +31,17 @@ const WeeklyReport: React.FC = () => {
   const targetWeekEnd = reviewTarget ? endOfISOWeek(targetWeekStart!) : null;
   const incompleteGoals = targetPlan?.goals.filter(g => !g.isCompleted) ?? [];
   const missingReasons = incompleteGoals.filter(g => !g.incompleteReason?.trim()).length;
+  const focusStart = startOfDay(subDays(now, 6));
+  const focusEnd = endOfDay(now);
+  const focusStats = Object.entries(pomodoroHistory).reduce((acc, [date, stats]) => {
+    const day = parseISO(date);
+    if (Number.isNaN(day.getTime())) return acc;
+    if (isWithinInterval(day, { start: focusStart, end: focusEnd })) {
+      acc.minutes += stats.minutes;
+      acc.sessions += stats.sessions;
+    }
+    return acc;
+  }, { minutes: 0, sessions: 0 });
   
   const completedCount = lastWeekTasks.filter(t => t.isCompleted).length;
   const totalCount = lastWeekTasks.length;
@@ -86,7 +97,7 @@ const WeeklyReport: React.FC = () => {
             <Clock size={16} /> 专注时长
           </div>
           <div className="text-3xl font-bold text-orange-500">
-            {lastWeekTasks.reduce((acc, t) => acc + (t.pomodoroCount * 25), 0)} <span className="text-sm font-normal text-slate-400">分钟</span>
+            {focusStats.minutes} <span className="text-sm font-normal text-slate-400">分钟</span>
           </div>
         </div>
       </div>
@@ -106,7 +117,7 @@ const WeeklyReport: React.FC = () => {
             完成度 {completionRate}% · 保持节奏即可
           </div>
           <div className="rounded-xl border border-white/60 bg-white/60 px-3 py-2">
-            番茄钟 {lastWeekTasks.reduce((acc, t) => acc + t.pomodoroCount, 0)} 轮 · 深度专注加分
+            番茄钟 {focusStats.sessions} 轮 · 深度专注加分
           </div>
         </div>
       </div>

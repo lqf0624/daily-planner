@@ -25,13 +25,11 @@ import DailyPlanner from './components/DailyPlanner';
 import TimelineView from './components/TimelineView';
 import QuarterlyGoals from './components/QuarterlyGoals';
 import PomodoroTimer from './components/PomodoroTimer';
-import PomodoroFloatingBall from './components/PomodoroFloatingBall';
 import AIAssistant from './components/AIAssistant';
 import WeeklyPlan from './components/WeeklyPlan';
 import Settings from './components/Settings';
 import HabitTracker from './components/HabitTracker';
 import WeeklyReport from './components/WeeklyReport';
-import { PomodoroProvider } from './contexts/PomodoroContext';
 
 type AppNotification = {
   title: string;
@@ -65,6 +63,19 @@ function App() {
     if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
       new Notification(payload.title, { body: payload.message });
     }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.ipcRenderer) return;
+    const handler = (_event: unknown, tab: string) => {
+      if (typeof tab === 'string') {
+        setActiveTab(tab);
+      }
+    };
+    window.ipcRenderer.on('app:open-tab', handler);
+    return () => {
+      window.ipcRenderer.off('app:open-tab', handler);
+    };
   }, []);
 
   const menuItems = [
@@ -201,7 +212,6 @@ function App() {
   };
 
   return (
-    <PomodoroProvider>
       <div className="relative flex h-screen w-screen overflow-hidden text-slate-900">
         <div className="pointer-events-none absolute inset-0">
           <div className="absolute -top-20 -right-10 h-72 w-72 rounded-full bg-primary/20 blur-3xl animate-[floatPulse_14s_ease-in-out_infinite]" />
@@ -351,10 +361,8 @@ function App() {
         </main>
         </div>
 
-        <PomodoroFloatingBall onOpen={() => setActiveTab('pomodoro')} />
         <Settings isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
       </div>
-    </PomodoroProvider>
   );
 }
 

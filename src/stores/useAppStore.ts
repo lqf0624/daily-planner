@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { Task, Group, QuarterlyGoal, WeeklyPlan, PomodoroSettings, AISettings, ChatMessage, Habit } from '../types';
+import { Task, Group, QuarterlyGoal, WeeklyPlan, PomodoroSettings, PomodoroHistory, AISettings, ChatMessage, Habit } from '../types';
 
 interface AppState {
   tasks: Task[];
@@ -9,6 +9,7 @@ interface AppState {
   weeklyPlans: WeeklyPlan[];
   habits: Habit[]; 
   pomodoroSettings: PomodoroSettings;
+  pomodoroHistory: PomodoroHistory;
   aiSettings: AISettings;
   chatHistory: ChatMessage[];
   _hasHydrated: boolean;
@@ -36,6 +37,7 @@ interface AppState {
   updateWeeklyPlan: (plan: WeeklyPlan) => void;
   toggleWeeklyGoal: (weekYearKey: string, goalId: string) => void;
   updatePomodoroSettings: (settings: Partial<PomodoroSettings>) => void;
+  logPomodoroSession: (date: string, minutes: number) => void;
   updateAISettings: (settings: Partial<AISettings>) => void;
 
   addChatMessage: (message: ChatMessage) => void;
@@ -62,6 +64,7 @@ export const useAppStore = create<AppState>()(
         autoStartPomodoros: false,
         maxSessions: 8,
       },
+      pomodoroHistory: {},
       aiSettings: {
         baseUrl: 'https://api.openai.com/v1',
         apiKey: '',
@@ -81,6 +84,7 @@ export const useAppStore = create<AppState>()(
         weeklyPlans: data.weeklyPlans || state.weeklyPlans,
         habits: data.habits || state.habits,
         pomodoroSettings: data.pomodoroSettings || state.pomodoroSettings,
+        pomodoroHistory: data.pomodoroHistory || state.pomodoroHistory,
         aiSettings: data.aiSettings || state.aiSettings,
       })),
 
@@ -157,6 +161,18 @@ export const useAppStore = create<AppState>()(
       updatePomodoroSettings: (settings) => set((state) => ({
         pomodoroSettings: { ...state.pomodoroSettings, ...settings }
       })),
+      logPomodoroSession: (date, minutes) => set((state) => {
+        const prev = state.pomodoroHistory[date] ?? { minutes: 0, sessions: 0 };
+        return {
+          pomodoroHistory: {
+            ...state.pomodoroHistory,
+            [date]: {
+              minutes: prev.minutes + minutes,
+              sessions: prev.sessions + 1,
+            },
+          },
+        };
+      }),
       updateAISettings: (settings) => set((state) => ({
         aiSettings: { ...state.aiSettings, ...settings }
       })),

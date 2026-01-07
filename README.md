@@ -53,6 +53,18 @@ npm run build:mac
 推送带 `v*` 标签（例如 `v0.1.0`），或在 Actions 手动触发 `build-desktop`，
 即可在 CI 中生成 Windows/Mac 安装包并下载。
 
+## macOS 安装提示
+
+如果 macOS 弹出“应用已损坏，无法打开”，通常是因为应用未签名/未公证被 Gatekeeper 拦截。
+没有 Apple 开发者账号时，可先用以下方式打开：
+
+```bash
+xattr -cr /Applications/daily\ planner.app
+```
+
+或在 Finder 中右键应用 → “打开”。  
+若需对外分发，建议配置签名与公证（Developer ID + Notarization）。
+
 ## 项目结构
 
 ```

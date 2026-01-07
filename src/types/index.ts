@@ -64,6 +64,13 @@ export interface PomodoroSettings {
   maxSessions: number;
 }
 
+export interface PomodoroDailyStats {
+  minutes: number;
+  sessions: number;
+}
+
+export type PomodoroHistory = Record<string, PomodoroDailyStats>;
+
 export interface AISettings {
   baseUrl: string;
   apiKey: string;
