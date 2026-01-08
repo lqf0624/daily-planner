@@ -1,172 +1,87 @@
 import axios from 'axios';
-import { AISettings, Task, QuarterlyGoal, WeeklyPlan, Habit } from '../types';
-import { isWorkday, isHoliday } from '../utils/holidays';
-import { parseISO, getDay, getDate, format } from 'date-fns';
+import { useAppStore } from '../stores/useAppStore';
+import { Task, Habit, QuarterlyGoal, AISettings, ChatMessage } from '../types';
+import { format, isWithinInterval, parseISO, startOfISOWeek, endOfISOWeek } from 'date-fns';
 
-interface AIContext {
-  tasks: Task[];
-  goals: QuarterlyGoal[];
-  weeklyPlans: WeeklyPlan[];
-  habits: Habit[];
-  currentDate: string;
-}
+const getContextPrompt = (tasks: Task[], habits: Habit[], goals: QuarterlyGoal[]) => {
+  const now = new Date();
+  const today = format(now, 'yyyy-MM-dd');
+  const weekStart = startOfISOWeek(now);
+  const weekEnd = endOfISOWeek(now);
 
-const SYSTEM_PROMPT = `
-你是一个专业的个人生产力助手 (Daily Planner AI)。
-你的目标是帮助用户高效地管理时间、规划任务、回顾进展并达成目标。
+  const todayTasks = tasks.filter(t => t.date === today);
+  const weekTasks = tasks.filter(t => {
+    const d = parseISO(t.date);
+    return isWithinInterval(d, { start: weekStart, end: weekEnd });
+  });
 
-### 核心能力：任务管理
-当用户明确表达出想要安排任务、添加日程的意图时（例如“今晚八点写论文”、“明天下午开会”、“提醒我买牛奶”），请务必**返回一个标准的 JSON 格式指令**，以便程序能够自动执行。
+  const activeGoals = goals.filter(g => !g.isCompleted);
 
-JSON 格式严格要求如下（不要包裹在 Markdown 代码块中，直接返回 JSON 字符串）：
-{
-  "action": "create_task",
-  "data": {
-    "title": "任务名称",
-    "date": "YYYY-MM-DD",
-    "startTime": "HH:mm" (可选，24小时制，如果不确定则留空),
-    "endTime": "HH:mm" (可选，24小时制，通常默认为开始时间后1小时),
-    "description": "备注信息" (可选)
-  },
-  "responseToUser": "简短的自然语言反馈，例如：'已为您添加任务：写论文'"
-}
+  return `
+你是一个智能日程助手。以下是用户当前的数据：
+- 今天日期: ${today}
+- 今日任务: ${todayTasks.map(t => `${t.title}(${t.isCompleted ? '已完成' : '进行中'})`).join(', ') || '无'}
+- 本周概览: ${weekTasks.length}个任务，已完成${weekTasks.filter(t => t.isCompleted).length}个
+- 季度目标: ${activeGoals.map(g => g.title).join(', ') || '无'}
+- 习惯追踪: ${habits.map(h => h.name).join(', ') || '无'}
 
-**注意**：
-- 如果用户只是询问建议或聊天，**不要**返回 JSON，请按下面的“一般对话规则”回复。
-- 请根据当前时间推断相对时间（例如“明天”、“下周一”）。
-- 如果没有具体时间，date 设为今天，startTime 留空。
-
-### 一般对话规则
-对于非任务创建类的请求：
-1.  **专业且富有同理心**：理解用户可能感到的压力，给予鼓励。
-2.  **简洁直接**：不要长篇大论，直接给出可执行的建议。
-3.  **基于数据**：引用用户的具体任务或目标来支持你的建议。
-4.  **结构化**：使用列表、粗体等格式让信息易于阅读。
+请基于以上背景回答用户的问题，提供建议或帮助管理任务。回答要简洁、专业且富有鼓励性。
 `;
-
-const isHabitDue = (habit: Habit, dateStr: string): boolean => {
-  const date = new Date(dateStr);
-  const dayOfWeek = date.getDay(); // 0-6
-
-  if (habit.frequency === 'daily') return true;
-  if (habit.frequency === 'weekdays') return dayOfWeek >= 1 && dayOfWeek <= 5;
-  if (habit.frequency === 'custom') return habit.customDays.includes(dayOfWeek);
-  return false;
 };
 
-// 复用 DailyPlanner 中的循环判断逻辑
-const checkRecurrence = (task: Task, targetDate: string): boolean => {
-  if (!task.recurrence || task.recurrence.type === 'none') return false;
-  if (task.date > targetDate) return false;
-  if (task.recurrence.endDate && targetDate > task.recurrence.endDate) return false;
-  if (task.recurrence.excludeHolidays && isHoliday(targetDate)) return false;
+export const sendMessageToAI = async (message: string, history: ChatMessage[]) => {
+  const { aiSettings, tasks, habits, goals, addChatMessage } = useAppStore.getState();
 
-  const targetDateObj = parseISO(targetDate);
-
-  switch (task.recurrence.type) {
-    case 'daily': return true;
-    case 'weekly': return getDay(parseISO(task.date)) === getDay(targetDateObj);
-    case 'monthly': return getDate(parseISO(task.date)) === getDate(targetDateObj);
-    case 'workdays': return isWorkday(targetDate);
-    default: return false;
+  if (!aiSettings.apiKey) {
+    throw new Error('请先在设置中配置 API Key');
   }
-};
 
-export const chatWithAI = async (message: string, settings: AISettings, context?: AIContext) => {
-  if (!settings.apiKey) {
-    throw new Error('请在设置中配置 API Key');
-  }
+  // 构建消息列表
+  const systemMessage = {
+    role: 'system' as const,
+    content: getContextPrompt(tasks, habits, goals)
+  };
 
   const messages = [
-    { role: 'system', content: SYSTEM_PROMPT }
+    systemMessage,
+    ...history.map(m => ({ role: hMap[m.role], content: m.content })),
+    { role: 'user' as const, content: message }
   ];
 
-  if (context) {
-    // 过滤相关任务：今天的任务 + 循环到今天的任务 + 过期未完成的任务
-    const relevantTasks = context.tasks.filter(t => {
-      // 1. 精确匹配今天的任务 (包括循环任务的例外实例)
-      if (t.date === context.currentDate) return true;
-
-      // 2. 过期未完成的任务 (非循环任务)
-      if (t.date < context.currentDate && !t.isCompleted && (!t.recurrence || t.recurrence.type === 'none')) {
-        return true;
-      }
-
-      // 3. 循环任务 (且今天有效，且没有被例外实例覆盖)
-      if (t.recurrence && t.recurrence.type !== 'none') {
-        const isOverridden = context.tasks.some(sub => sub.parentTaskId === t.id && sub.originalDate === context.currentDate);
-        if (isOverridden) return false; // 已经被具体的例外任务覆盖了
-        return checkRecurrence(t, context.currentDate);
-      }
-
-      return false;
-    });
-
-    const taskSummary = relevantTasks.length > 0 
-      ? relevantTasks.map(t => {
-          // 修复：使用 parseISO 和 format 转换为本地时间，而不是直接截取 UTC 字符串
-          const timeInfo = t.hasTime && t.startTime ? ` [${format(parseISO(t.startTime), 'HH:mm')}]` : '';
-          const status = t.date < context.currentDate && !t.isCompleted ? '(已过期)' : t.isCompleted ? '(已完成)' : '';
-          const recurrence = t.recurrence && t.recurrence.type !== 'none' ? `[循环: ${t.recurrence.type}]` : '';
-          return `- [${t.isCompleted ? 'x' : ' '}] ${t.title}${timeInfo} ${status} ${recurrence}`;
-        }).join('\n')
-      : "今天暂无任务";
-    
-    const goalSummary = context.goals.length > 0
-      ? context.goals.map(g => `- ${g.title} (进度: ${g.progress}%)`).join('\n')
-      : "暂无季度目标";
-
-    const habitSummary = context.habits.length > 0
-      ? context.habits
-          .filter(h => isHabitDue(h, context.currentDate))
-          .map(h => {
-            const isDone = h.completedDates.includes(context.currentDate);
-            return `- [${isDone ? 'x' : ' '}] ${h.name} (${h.frequency === 'daily' ? '每天' : h.frequency === 'weekdays' ? '工作日' : '自定义'})`;
-          })
-          .join('\n')
-      : "暂无习惯";
-
-    const currentTime = format(new Date(), 'HH:mm');
-    const contextMsg = `
-当前日期: ${context.currentDate}
-当前时间: ${currentTime}
-
-我的今日任务概览 (Tasks):
-${taskSummary}
-
-我的习惯打卡 (Habits - 今天需要执行的):
-${habitSummary || "今天没有需要执行的习惯"}
-
-我的季度目标 (Goals):
-${goalSummary}
-`;
-    // Add context as a system message to provide background info without confusing the conversation flow
-    messages.push({ role: 'system', content: `上下文信息:\n${contextMsg}` });
-  }
-
-  messages.push({ role: 'user', content: message });
-
-  // 调试：在控制台打印发送给 AI 的完整上下文信息
-  const logMsg = JSON.stringify(messages, null, 2);
-  console.log('🤖 AI Context & Messages:', logMsg);
-  
   try {
-    const response = await axios.post(`${settings.baseUrl}/chat/completions`, {
-      model: settings.model,
-      messages: messages,
+    const response = await axios.post(`${aiSettings.baseUrl}/chat/completions`, {
+      model: aiSettings.model,
+      messages,
       temperature: 0.7,
     }, {
       headers: {
-        'Authorization': `Bearer ${settings.apiKey}`,
-        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${aiSettings.apiKey}`,
+        'Content-Type': 'application/json'
       }
     });
 
-    return response.data.choices[0].message.content;
-  } catch (error: unknown) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const err = error as any;
-    console.error('AI API Error:', err.response?.data || err.message);
-    throw new Error(err.response?.data?.error?.message || '与 AI 通信时出错，请检查 API 设置');
+    const aiContent = response.data.choices[0].message.content;
+    const newMessage: ChatMessage = {
+      role: 'assistant',
+      content: aiContent,
+      timestamp: Date.now()
+    };
+    addChatMessage(newMessage);
+    return aiContent;
+  } catch (error: any) {
+    console.error('AI Service Error:', error);
+    throw new Error(error.response?.data?.error?.message || '请求 AI 服务失败，请检查网络或配置');
   }
+};
+
+const hMap: Record<string, 'user' | 'assistant' | 'system'> = {
+  'user': 'user',
+  'assistant': 'assistant',
+  'system': 'system'
+};
+
+// 建议任务分析功能 (Placeholder for future feature)
+export const analyzeScheduleWithAI = async () => {
+  // 可以根据需要实现自动分析逻辑
+  return "根据您的日程，建议优先处理高优先级任务。";
 };
