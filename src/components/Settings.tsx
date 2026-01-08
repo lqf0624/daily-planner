@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, Trash2, Languages, Info, Download, CheckCircle2, Loader2, Globe, Cpu, Key } from 'lucide-react';
+import { X, Save, Trash2, Languages, Info, Download, Globe, Cpu, Key } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../utils/cn';
@@ -9,7 +9,7 @@ interface SettingsProps {
   onClose: () => void;
 }
 
-type UpdateStatus = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error' | 'latest';
+type UpdateStatus = 'idle' | 'checking' | 'available' | 'error' | 'latest';
 
 const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
   const { aiSettings, updateAISettings, clearPomodoroHistory, language, setLanguage } = useAppStore();
@@ -18,8 +18,6 @@ const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
   // 更新相关状态
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>('idle');
   const [updateInfo, setUpdateInfo] = useState<{ version: string, url: string, notes?: string } | null>(null);
-  const [downloadProgress, setDownloadProgress] = useState(0);
-  const [downloadPath, setDownloadPath] = useState('');
   const [currentVersion, setCurrentVersion] = useState('');
 
   useEffect(() => {
@@ -29,31 +27,6 @@ const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
     window.ipcRenderer.invoke('app:get-version').then((v: unknown) => {
       if (typeof v === 'string') setCurrentVersion(v);
     });
-
-    const progressHandler = (_: unknown, progress: unknown) => {
-      setUpdateStatus('downloading');
-      setDownloadProgress(progress as number);
-    };
-
-    const completeHandler = (_: unknown, path: unknown) => {
-      setUpdateStatus('ready');
-      setDownloadPath(path as string);
-    };
-
-    const errorHandler = (_: unknown, err: unknown) => {
-      setUpdateStatus('error');
-      console.error('Download error:', err);
-    };
-
-    window.ipcRenderer.on('app:download-progress', progressHandler);
-    window.ipcRenderer.on('app:download-complete', completeHandler);
-    window.ipcRenderer.on('app:download-error', errorHandler);
-
-    return () => {
-      window.ipcRenderer.off('app:download-progress', progressHandler);
-      window.ipcRenderer.off('app:download-complete', completeHandler);
-      window.ipcRenderer.off('app:download-error', errorHandler);
-    };
   }, []);
 
   if (!isOpen) return null;
@@ -81,14 +54,16 @@ const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
     }
   };
 
-  const startDownload = () => {
+  const openDownloadPage = () => {
     if (updateInfo?.url) {
-      window.ipcRenderer.send('app:start-download', updateInfo.url);
+      // 使用 shell.openExternal (通过 preload 暴露的 app:open-external 或者直接用 app:start-download 的通道改成打开网页)
+      // 由于之前 main.ts 里没有专门的 open-external 通道，我们可以复用 app:install-update (它原本就是 shell.openPath)，或者新增一个。
+      // 但最简单的是直接让 main 暴露一个 openExternal。
+      // 暂时假设 main.ts 会处理这个，我们先用 window.open 试试，或者更稳妥地，发送一个明确的指令。
+      // 鉴于 main.ts 里已经有 shell 模块，我们可以发送一个专门的事件。
+      window.ipcRenderer.send('app:open-url', updateInfo.url);
+      setUpdateStatus('idle');
     }
-  };
-
-  const installUpdate = () => {
-    window.ipcRenderer.send('app:install-update', downloadPath);
   };
 
   const handleClearHistory = () => {
@@ -102,54 +77,25 @@ const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
       <div className="bg-white/90 rounded-[28px] w-full max-w-lg p-6 shadow-[var(--shadow-card)] border border-white/60 overflow-y-auto max-h-[90vh] relative">
         
         <AnimatePresence>
-          {(updateStatus === 'downloading' || updateStatus === 'ready' || updateStatus === 'available') && (
+          {updateStatus === 'available' && (
             <motion.div 
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               className="absolute inset-0 z-[60] bg-white/95 backdrop-blur-md flex flex-col items-center justify-center p-8 text-center"
             >
-              {updateStatus === 'available' && (
-                <div className="space-y-6">
-                  <div className="w-20 h-20 bg-primary/10 text-primary rounded-3xl flex items-center justify-center mx-auto mb-4">
-                    <Download size={40} />
-                  </div>
-                  <h3 className="text-2xl font-bold text-slate-800">发现新版本 v{updateInfo?.version}</h3>
-                  <div className="bg-slate-50 rounded-2xl p-4 text-left max-h-40 overflow-y-auto border border-slate-100">
-                    <p className="text-xs font-bold text-slate-400 uppercase mb-2">更新日志</p>
-                    <pre className="text-sm text-slate-600 whitespace-pre-wrap font-sans">{updateInfo?.notes || '优化了性能和用户体验'}</pre>
-                  </div>
-                  <div className="flex gap-3 w-full">
-                    <button onClick={() => setUpdateStatus('idle')} className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-2xl font-bold hover:bg-slate-200">稍后</button>
-                    <button onClick={startDownload} className="flex-1 py-3 bg-primary text-white rounded-2xl font-bold hover:bg-primary-dark shadow-lg shadow-primary/20">立即下载</button>
-                  </div>
+              <div className="space-y-6">
+                <div className="w-20 h-20 bg-primary/10 text-primary rounded-3xl flex items-center justify-center mx-auto mb-4">
+                  <Download size={40} />
                 </div>
-              )}
-
-              {updateStatus === 'downloading' && (
-                <div className="w-full space-y-6">
-                  <Loader2 className="animate-spin text-primary mx-auto" size={48} />
-                  <div>
-                    <h3 className="text-xl font-bold text-slate-800">正在下载更新...</h3>
-                    <p className="text-sm text-slate-500 mt-1">请勿关闭应用，下载完成后将提示安装</p>
-                  </div>
-                  <div className="w-full bg-slate-100 h-4 rounded-full overflow-hidden border border-slate-200 p-0.5">
-                    <motion.div initial={{ width: 0 }} animate={{ width: `${downloadProgress}%` }} className="h-full bg-primary rounded-full shadow-sm" />
-                  </div>
-                  <span className="text-2xl font-black text-primary font-mono">{downloadProgress}%</span>
+                <h3 className="text-2xl font-bold text-slate-800">发现新版本 v{updateInfo?.version}</h3>
+                <div className="bg-slate-50 rounded-2xl p-4 text-left max-h-40 overflow-y-auto border border-slate-100">
+                  <p className="text-xs font-bold text-slate-400 uppercase mb-2">更新日志</p>
+                  <pre className="text-sm text-slate-600 whitespace-pre-wrap font-sans">{updateInfo?.notes || '优化了性能和用户体验'}</pre>
                 </div>
-              )}
-
-              {updateStatus === 'ready' && (
-                <div className="space-y-6">
-                  <div className="w-20 h-20 bg-secondary/10 text-secondary rounded-3xl flex items-center justify-center mx-auto mb-4">
-                    <CheckCircle2 size={40} />
-                  </div>
-                  <h3 className="text-2xl font-bold text-slate-800">下载完成！</h3>
-                  <p className="text-slate-500">新版本已准备就绪，点击下方按钮开始安装。</p>
-                  <button onClick={installUpdate} className="w-full py-4 bg-secondary text-white rounded-2xl font-bold hover:bg-secondary-dark shadow-xl shadow-secondary/20 transition-all active:scale-95">
-                    开始安装并重启
-                  </button>
+                <div className="flex gap-3 w-full">
+                  <button onClick={() => setUpdateStatus('idle')} className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-2xl font-bold hover:bg-slate-200">稍后</button>
+                  <button onClick={openDownloadPage} className="flex-1 py-3 bg-primary text-white rounded-2xl font-bold hover:bg-primary-dark shadow-lg shadow-primary/20">前往下载</button>
                 </div>
-              )}
+              </div>
             </motion.div>
           )}
         </AnimatePresence>

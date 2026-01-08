@@ -67,6 +67,22 @@ export const PomodoroProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     };
   }, [logPomodoroSession]);
 
+  // 前端独立计时逻辑：减少 IPC 通信频率，提升性能
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+    if (state?.isActive) {
+      interval = setInterval(() => {
+        setState(prev => {
+          if (!prev || prev.timeLeft <= 0) return prev;
+          return { ...prev, timeLeft: prev.timeLeft - 1 };
+        });
+      }, 1000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [state?.isActive]);
+
   const toggleTimer = useCallback(() => {
     window.ipcRenderer.send('pomodoro:action', { type: 'toggle' });
   }, []);

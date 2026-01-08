@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { AISettings, Task, QuarterlyGoal, WeeklyPlan, Habit } from '../types';
 import { isWorkday, isHoliday } from '../utils/holidays';
-import { parseISO, getDay, getDate } from 'date-fns';
+import { parseISO, getDay, getDate, format } from 'date-fns';
 
 interface AIContext {
   tasks: Task[];
@@ -104,7 +104,8 @@ export const chatWithAI = async (message: string, settings: AISettings, context?
 
     const taskSummary = relevantTasks.length > 0 
       ? relevantTasks.map(t => {
-          const timeInfo = t.hasTime && t.startTime ? ` [${t.startTime.split('T')[1]?.slice(0, 5) || ''}]` : '';
+          // 修复：使用 parseISO 和 format 转换为本地时间，而不是直接截取 UTC 字符串
+          const timeInfo = t.hasTime && t.startTime ? ` [${format(parseISO(t.startTime), 'HH:mm')}]` : '';
           const status = t.date < context.currentDate && !t.isCompleted ? '(已过期)' : t.isCompleted ? '(已完成)' : '';
           const recurrence = t.recurrence && t.recurrence.type !== 'none' ? `[循环: ${t.recurrence.type}]` : '';
           return `- [${t.isCompleted ? 'x' : ' '}] ${t.title}${timeInfo} ${status} ${recurrence}`;
@@ -125,8 +126,10 @@ export const chatWithAI = async (message: string, settings: AISettings, context?
           .join('\n')
       : "暂无习惯";
 
+    const currentTime = format(new Date(), 'HH:mm');
     const contextMsg = `
 当前日期: ${context.currentDate}
+当前时间: ${currentTime}
 
 我的今日任务概览 (Tasks):
 ${taskSummary}

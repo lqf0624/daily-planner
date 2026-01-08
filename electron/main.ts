@@ -2,7 +2,6 @@ import { app, BrowserWindow, ipcMain, screen, Menu, nativeImage, Tray, Notificat
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import https from 'node:https'
-import fs from 'node:fs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 process.env.APP_ROOT = path.join(__dirname, '..')
@@ -168,7 +167,9 @@ function startTimer() {
   mainTimer = setInterval(() => {
     if (pomodoroState.isActive && pomodoroState.timeLeft > 0) {
       pomodoroState.timeLeft -= 1;
-      broadcastState();
+      if (pomodoroState.timeLeft % 30 === 0) {
+        broadcastState();
+      }
     } else if (pomodoroState.isActive && pomodoroState.timeLeft === 0) {
       handleModeComplete();
     }
@@ -207,7 +208,14 @@ function createTray() {
       },
       { label: '显示/隐藏悬浮窗', click: () => toggleFloatingWindow() },
       { type: 'separator' },
-      { label: '检查更新', click: () => shell.openExternal('https://github.com/lqf0624/daily-planner-ai/releases/latest') },
+      { label: '检查更新', click: () => { 
+          if (win && !win.isDestroyed()) {
+            win.show();
+            win.focus();
+            win.webContents.send('app:check-for-updates-request');
+          }
+        } 
+      },
       { type: 'separator' },
       { label: '退出', click: () => { isQuitting = true; app.quit(); } }
     ]);
@@ -230,6 +238,7 @@ function toggleFloatingWindow() {
 function createWindow() {
   win = new BrowserWindow({
     icon: getAppIconPath(), width: 1200, height: 800,
+    minWidth: 1000, minHeight: 700,
     frame: false, transparent: true, backgroundColor: '#00000000',
     webPreferences: { preload: path.join(__dirname, 'preload.mjs'), backgroundThrottling: false }
   });
@@ -247,8 +256,13 @@ function createFloatingWindow() {
     frame: false, transparent: true, alwaysOnTop: true, skipTaskbar: true,
     resizable: false,
     backgroundColor: '#00000000',
-    webPreferences: { preload: path.join(__dirname, 'preload.mjs'), backgroundThrottling: false }
+    webPreferences: { 
+      preload: path.join(__dirname, 'preload.mjs'), 
+      backgroundThrottling: false,
+      zoomFactor: 1.0 
+    }
   });
+  floatingWin.webContents.setVisualZoomLevelLimits(1, 1);
   floatingWin.loadURL(`${VITE_DEV_SERVER_URL || 'file://' + path.join(RENDERER_DIST, 'index.html')}?view=floating`);
   floatingWin.on('closed', () => { floatingWin = null; });
 }
@@ -265,7 +279,7 @@ ipcMain.handle('app:check-update', async () => {
   return new Promise((resolve) => {
     const options = {
       hostname: 'api.github.com',
-      path: '/repos/lqf0624/daily-planner-ai/releases/latest',
+      path: '/repos/lqf0624/daily-planner/releases/latest',
       headers: { 'User-Agent': 'Daily-Planner-AI', 'Cache-Control': 'no-cache' }
     };
     https.get(options, (res) => {
@@ -276,8 +290,16 @@ ipcMain.handle('app:check-update', async () => {
           if (res.statusCode !== 200) { resolve(null); return; }
           const release = JSON.parse(data);
           const version = release.tag_name.replace('v', '');
-          const platformExt = process.platform === 'win32' ? '.exe' : '.dmg';
-          const asset = release.assets.find((a: GitHubAsset) => a.name.endsWith(platformExt));
+          
+          let asset;
+          if (process.platform === 'win32') {
+            asset = release.assets.find((a: GitHubAsset) => a.name.endsWith('-Setup.exe'));
+          } else if (process.platform === 'darwin') {
+            asset = release.assets.find((a: GitHubAsset) => a.name.endsWith('-Installer.dmg'));
+          } else if (process.platform === 'linux') {
+            asset = release.assets.find((a: GitHubAsset) => a.name.endsWith('.AppImage'));
+          }
+
           resolve({ version, url: asset?.browser_download_url, notes: release.body });
         } catch (e) { resolve(null); }
       });
@@ -285,50 +307,15 @@ ipcMain.handle('app:check-update', async () => {
   });
 });
 
-ipcMain.on('app:start-download', (event, url) => {
-  const fileName = path.basename(url);
-  const filePath = path.join(app.getPath('downloads'), fileName);
-  const file = fs.createWriteStream(filePath);
-  
-  const download = (targetUrl: string) => {
-    https.get(targetUrl, { headers: { 'User-Agent': 'Daily-Planner-AI' } }, (res) => {
-      if (res.statusCode === 302 && res.headers.location) {
-        download(res.headers.location);
-        return;
-      }
-      const totalSize = parseInt(res.headers['content-length'] || '0', 10);
-      let downloadedSize = 0;
-      res.on('data', (chunk) => {
-        downloadedSize += chunk.length;
-        file.write(chunk);
-        if (totalSize) event.reply('app:download-progress', Math.round((downloadedSize / totalSize) * 100));
-      });
-      res.on('end', () => {
-        file.end();
-        event.reply('app:download-complete', filePath);
-      });
-    }).on('error', (err) => {
-      fs.unlink(filePath, () => {});
-      event.reply('app:download-error', err.message);
-    });
-  };
-  download(url);
-});
-
-ipcMain.on('app:install-update', (_event, filePath) => { shell.openPath(filePath); });
+ipcMain.on('app:open-url', (_event, url) => { shell.openExternal(url); });
 
 // --- IPC 监听 ---
 ipcMain.on('floating:toggle', () => toggleFloatingWindow());
 ipcMain.on('floating:show', () => { if (floatingWin) floatingWin.show(); else createFloatingWindow(); });
 ipcMain.on('floating:resize', (_event, size) => {
   if (floatingWin && !floatingWin.isDestroyed()) {
-    const [currentW, currentH] = floatingWin.getSize();
-    if (currentW !== size.width || currentH !== size.height) {
-      const [oldX, oldY] = floatingWin.getPosition();
-      const newX = oldX + (currentW - size.width);
-      const newY = oldY + (currentH - size.height);
-      floatingWin.setBounds({ x: newX, y: newY, width: size.width, height: size.height });
-    }
+    // 直接设置大小，不尝试保持右下角固定，以避免在 Linux/高 DPI 下因 getSize 返回物理像素导致的位移（漂移）问题
+    floatingWin.setSize(size.width, size.height);
   }
 });
 

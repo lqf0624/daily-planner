@@ -16,6 +16,7 @@ const FloatingPomodoro: React.FC = () => {
   const [alwaysOnTop, setAlwaysOnTop] = useState(true);
   const [isMiniBar, setIsMiniBar] = useState(false);
   const dragRef = useRef<DragState | null>(null);
+  const isPointerDownRef = useRef(false);
   
   const [isPressingSkip, setIsPressingSkip] = useState(false);
   const skipTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -48,9 +49,14 @@ const FloatingPomodoro: React.FC = () => {
     if (target.closest('button')) return;
 
     event.preventDefault();
+    isPointerDownRef.current = true;
     event.currentTarget.setPointerCapture(event.pointerId);
     
     const position = await window.ipcRenderer.invoke('floating:getPosition') as { x: number, y: number };
+    
+    // 如果在获取位置的过程中鼠标已经抬起，则不开始拖拽
+    if (!isPointerDownRef.current) return;
+
     dragRef.current = {
       offsetX: event.screenX - (position?.x || 0),
       offsetY: event.screenY - (position?.y || 0),
@@ -61,6 +67,13 @@ const FloatingPomodoro: React.FC = () => {
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    // 安全检查：如果没有按下任何键，强制停止拖拽
+    if (event.buttons === 0 && dragRef.current) {
+      dragRef.current = null;
+      isPointerDownRef.current = false;
+      return;
+    }
+
     if (!dragRef.current) return;
     const nextX = Math.round(event.screenX - dragRef.current.offsetX);
     const nextY = Math.round(event.screenY - dragRef.current.offsetY);
@@ -78,6 +91,7 @@ const FloatingPomodoro: React.FC = () => {
   };
 
   const handlePointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    isPointerDownRef.current = false;
     if (!dragRef.current) return;
     event.currentTarget.releasePointerCapture(event.pointerId);
     dragRef.current = null;
@@ -104,13 +118,13 @@ const FloatingPomodoro: React.FC = () => {
     // ... (mini bar logic)
     return (
       <div 
-        className="h-screen w-screen p-1 select-none flex items-center justify-center overflow-hidden"
+        className="h-full w-full p-1 select-none flex items-center justify-center overflow-hidden"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
       >
         <div 
-          className="relative flex h-full w-full items-center justify-between px-3 rounded-full border border-white/40 bg-white/80 shadow-xl backdrop-blur-xl transition-all"
+          className="relative flex h-full w-full items-center justify-between px-3 rounded-full border border-white/40 bg-white/90 shadow-xl transition-all"
           style={{ borderLeft: `4px solid ${ringColor}` }}
         >
           <div className="flex items-center gap-2">
@@ -153,7 +167,7 @@ const FloatingPomodoro: React.FC = () => {
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
     >
-      <div className="relative h-full w-full overflow-hidden rounded-[28px] border border-white/70 bg-white/80 shadow-2xl backdrop-blur-xl">
+      <div className="relative h-full w-full overflow-hidden rounded-[28px] border border-white/70 bg-white/90 shadow-2xl">
         <div className="absolute -top-10 -right-6 h-24 w-24 rounded-full bg-primary/20 blur-2xl" />
         <div className="relative z-10 flex h-full flex-col items-center justify-between p-3 text-slate-800">
           <div className="flex w-full items-center justify-between">

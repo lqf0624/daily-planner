@@ -51,12 +51,15 @@ const AIAssistant: React.FC = () => {
         
         if (actionData.action === 'create_task' && actionData.data) {
            const { title, date, startTime, endTime, description } = actionData.data;
+           const taskDate = date || format(new Date(), 'yyyy-MM-dd');
+           
            addTask({
              id: crypto.randomUUID(),
              title: title || '未命名任务',
-             date: date || format(new Date(), 'yyyy-MM-dd'),
-             startTime: startTime ? `${date}T${startTime}:00` : undefined, // Assuming date is YYYY-MM-DD
-             endTime: endTime ? `${date}T${endTime}:00` : undefined,
+             date: taskDate,
+             // 存储为 YYYY-MM-DDTHH:mm:ss 格式，不带 Z 或时区，这样 new Date() 会将其解析为本地时间
+             startTime: startTime ? `${taskDate}T${startTime}:00` : undefined,
+             endTime: endTime ? `${taskDate}T${endTime}:00` : undefined,
              hasTime: !!startTime,
              isCompleted: false,
              groupId: 'work', 

@@ -13,8 +13,10 @@ interface AppState {
   aiSettings: AISettings;
   chatHistory: ChatMessage[];
   language: 'zh-CN' | 'en-US';
+  isSettingsOpen: boolean;
   _hasHydrated: boolean;
   
+  setIsSettingsOpen: (isOpen: boolean) => void;
   setHasHydrated: (state: boolean) => void;
   setLanguage: (lang: 'zh-CN' | 'en-US') => void;
   importData: (data: Partial<AppState>) => void; 
@@ -77,8 +79,10 @@ export const useAppStore = create<AppState>()(
         { role: 'assistant', content: '你好！我是你的 AI 任务助手。我已经准备好为您服务了。', timestamp: Date.now() }
       ],
       language: 'zh-CN',
+      isSettingsOpen: false,
       _hasHydrated: false,
 
+      setIsSettingsOpen: (isOpen) => set({ isSettingsOpen: isOpen }),
       setHasHydrated: (state) => set({ _hasHydrated: state }),
       setLanguage: (lang) => set({ language: lang }),
       

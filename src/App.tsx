@@ -180,10 +180,9 @@ const ToastContainer = ({ toasts, removeToast }: { toasts: ToastType[], removeTo
 };
 
 function App() {
-  const { weeklyPlans, habits, tasks, _hasHydrated } = useAppStore();
+  const { weeklyPlans, habits, tasks, _hasHydrated, isSettingsOpen, setIsSettingsOpen } = useAppStore();
   const [activeTab, setActiveTab] = useState('planner');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [closeModalOpen, setCloseModalOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastType[]>([]);
   const lastTaskReminderRef = useRef<Record<string, string>>({});
@@ -191,12 +190,17 @@ function App() {
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.ipcRenderer) return;
-    const handler = () => setCloseModalOpen(true);
-    window.ipcRenderer.on('app:request-close', handler);
+    const closeHandler = () => setCloseModalOpen(true);
+    const updateHandler = () => setIsSettingsOpen(true);
+
+    window.ipcRenderer.on('app:request-close', closeHandler);
+    window.ipcRenderer.on('app:check-for-updates-request', updateHandler);
+    
     return () => {
-      window.ipcRenderer.off('app:request-close', handler);
+      window.ipcRenderer.off('app:request-close', closeHandler);
+      window.ipcRenderer.off('app:check-for-updates-request', updateHandler);
     };
-  }, []);
+  }, [setIsSettingsOpen]);
 
   const pushNotification = useCallback((payload: AppNotification) => {
     if (document.hasFocus()) {
@@ -439,7 +443,7 @@ function App() {
             ))}
           </nav>
           <div className="p-4 border-t border-slate-100/60">
-            <button onClick={() => setSettingsOpen(true)} className={cn("flex items-center text-slate-600 hover:bg-slate-100/70 p-2 rounded-2xl w-full transition-colors gap-3", sidebarCollapsed ? "justify-center" : "")}>
+            <button onClick={() => setIsSettingsOpen(true)} className={cn("flex items-center text-slate-600 hover:bg-slate-100/70 p-2 rounded-2xl w-full transition-colors gap-3", sidebarCollapsed ? "justify-center" : "")}>
               <SettingsIcon size={18} className="shrink-0" />
               {!sidebarCollapsed && <span className="truncate">设置</span>}
             </button>
@@ -564,7 +568,7 @@ function App() {
         </main>
         </div>
 
-        <Settings isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
+        <Settings isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
       </div>
   );
 }
