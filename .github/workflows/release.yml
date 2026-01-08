@@ -38,11 +38,9 @@ jobs:
 
       - name: install frontend dependencies
         run: npm install
-        working-directory: daily-planner-ai
 
       - name: build frontend
         run: npm run build
-        working-directory: daily-planner-ai
 
       - name: build tauri
         uses: tauri-apps/tauri-action@v0
@@ -57,4 +55,3 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
-          projectPath: daily-planner-ai
