@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { useAppStore } from '../stores/useAppStore';
-import { Task, Habit, QuarterlyGoal, AISettings, ChatMessage } from '../types';
+import { Task, Habit, QuarterlyGoal, ChatMessage } from '../types';
 import { format, isWithinInterval, parseISO, startOfISOWeek, endOfISOWeek } from 'date-fns';
 
 const getContextPrompt = (tasks: Task[], habits: Habit[], goals: QuarterlyGoal[]) => {

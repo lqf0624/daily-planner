@@ -5,12 +5,11 @@ import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import 'highlight.js/styles/github-dark.css';
 import { useAppStore } from '../stores/useAppStore';
-import { chatWithAI } from '../services/aiService';
+import { sendMessageToAI } from '../services/aiService';
 import { cn } from '../utils/cn';
-import { format } from 'date-fns';
 
 const AIAssistant: React.FC = () => {
-  const { aiSettings, tasks, goals, weeklyPlans, habits, chatHistory, addChatMessage, clearChatHistory, addTask } = useAppStore();
+  const { chatHistory, addChatMessage, clearChatHistory, addTask } = useAppStore();
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -27,37 +26,27 @@ const AIAssistant: React.FC = () => {
     if (!input.trim() || isLoading) return;
     
     const userMsg = input;
-    // Save user message to store
     addChatMessage({ role: 'user', content: userMsg, timestamp: Date.now() });
     
     setInput('');
     setIsLoading(true);
 
     try {
-      const context = {
-        tasks,
-        goals,
-        weeklyPlans,
-        habits,
-        currentDate: format(new Date(), 'yyyy-MM-dd'),
-      };
-      const response = await chatWithAI(userMsg, aiSettings, context);
+      // 修正：调用新的 sendMessageToAI 函数，其内部会自动从 Store 获取上下文
+      const response = await sendMessageToAI(userMsg, chatHistory);
 
-      // Attempt to parse JSON command from AI response
       try {
-        // Cleaning up potential markdown code blocks if AI fails to follow "raw JSON" instruction
         const cleanResponse = response.replace(/^```json\s*/, '').replace(/\s*```$/, '');
         const actionData = JSON.parse(cleanResponse);
         
         if (actionData.action === 'create_task' && actionData.data) {
            const { title, date, startTime, endTime, description } = actionData.data;
-           const taskDate = date || format(new Date(), 'yyyy-MM-dd');
+           const taskDate = date || new Date().toISOString().split('T')[0];
            
            addTask({
              id: crypto.randomUUID(),
              title: title || '未命名任务',
              date: taskDate,
-             // 存储为 YYYY-MM-DDTHH:mm:ss 格式，不带 Z 或时区，这样 new Date() 会将其解析为本地时间
              startTime: startTime ? `${taskDate}T${startTime}:00` : undefined,
              endTime: endTime ? `${taskDate}T${endTime}:00` : undefined,
              hasTime: !!startTime,
@@ -78,11 +67,11 @@ const AIAssistant: React.FC = () => {
            return;
         }
       } catch (e) {
-        // Not a JSON action, proceed as normal text response
+        // Normal text response
       }
 
-      // Save AI response to store
-      addChatMessage({ role: 'assistant', content: response, timestamp: Date.now() });
+      // Final assistant message is already handled inside sendMessageToAI via store
+      // But we need to keep UI consistent if there's any lag
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       addChatMessage({ role: 'assistant', content: `错误: ${errorMessage}`, timestamp: Date.now() });
@@ -92,7 +81,6 @@ const AIAssistant: React.FC = () => {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    // Check isComposing to support Chinese IME
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       handleSend();
