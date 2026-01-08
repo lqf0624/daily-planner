@@ -14,9 +14,11 @@ interface AppState {
   chatHistory: ChatMessage[];
   language: 'zh-CN' | 'en-US';
   isSettingsOpen: boolean;
+  isPomodoroMiniPlayer: boolean;
   _hasHydrated: boolean;
   
   setIsSettingsOpen: (isOpen: boolean) => void;
+  setIsPomodoroMiniPlayer: (isMini: boolean) => void;
   setHasHydrated: (state: boolean) => void;
   setLanguage: (lang: 'zh-CN' | 'en-US') => void;
   importData: (data: Partial<AppState>) => void; 
@@ -80,9 +82,11 @@ export const useAppStore = create<AppState>()(
       ],
       language: 'zh-CN',
       isSettingsOpen: false,
+      isPomodoroMiniPlayer: false,
       _hasHydrated: false,
 
       setIsSettingsOpen: (isOpen) => set({ isSettingsOpen: isOpen }),
+      setIsPomodoroMiniPlayer: (isMini) => set({ isPomodoroMiniPlayer: isMini }),
       setHasHydrated: (state) => set({ _hasHydrated: state }),
       setLanguage: (lang) => set({ language: lang }),
       
@@ -172,14 +176,14 @@ export const useAppStore = create<AppState>()(
         pomodoroSettings: { ...state.pomodoroSettings, ...settings }
       })),
       logPomodoroSession: (date, minutes) => set((state) => {
-        if (minutes <= 0) return state; // 防御性检查
-        const prev = state.pomodoroHistory[date] ?? { minutes: 0, sessions: 0 };
+        if (minutes <= 0) return state;
+        const prev = state.pomodoroHistory[date] || { minutes: 0, sessions: 0 };
         return {
           pomodoroHistory: {
             ...state.pomodoroHistory,
             [date]: {
-              minutes: prev.minutes + minutes,
-              sessions: prev.sessions + 1,
+              minutes: (prev.minutes || 0) + minutes,
+              sessions: (prev.sessions || 0) + 1,
             },
           },
         };

@@ -5,6 +5,8 @@ import FloatingPomodoro from './views/FloatingPomodoro.tsx'
 import './index.css'
 import { PomodoroProvider } from './contexts/PomodoroContext'
 
+console.log('🚀 Daily Planner Frontend Initializing...');
+
 const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
 const view = params?.get('view')
 const Root = view === 'floating' ? FloatingPomodoro : App
@@ -21,8 +23,3 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     </PomodoroProvider>
   </React.StrictMode>,
 )
-
-// Use contextBridge
-window.ipcRenderer.on('main-process-message', (_event, message) => {
-  console.log(message)
-})

@@ -99,7 +99,7 @@ export interface ChatMessage {
   timestamp: number;
 }
 
-export type FrequencyType = 'daily' | 'weekdays' | 'custom';
+export type FrequencyType = 'daily' | 'smart_workdays' | 'smart_holidays' | 'custom';
 
 export interface Habit {
   id: string;

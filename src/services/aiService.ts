@@ -150,11 +150,6 @@ ${goalSummary}
   const logMsg = JSON.stringify(messages, null, 2);
   console.log('🤖 AI Context & Messages:', logMsg);
   
-  // 发送到主进程以便在终端显示
-  if (window.ipcRenderer) {
-    window.ipcRenderer.send('log-message', `\n[AI Debug] Prompt Payload:\n${logMsg}\n`);
-  }
-
   try {
     const response = await axios.post(`${settings.baseUrl}/chat/completions`, {
       model: settings.model,

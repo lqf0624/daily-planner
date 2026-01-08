@@ -7,12 +7,29 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependencies
 node_modules
+.pnp
+.pnp.js
+
+# Production
 dist
 dist-electron
 dist-ssr
-*.local
 release
+
+# Rust/Tauri
+src-tauri/target
+src-tauri/gen/schemas
+src-tauri/remote
+
+# Misc
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.local
 GEMINI.md
 
 # Editor directories and files

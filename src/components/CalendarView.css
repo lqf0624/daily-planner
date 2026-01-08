@@ -1,0 +1,55 @@
+/* 覆盖 FullCalendar 默认样式以匹配应用风格 */
+.fc {
+  --fc-border-color: rgba(226, 232, 240, 0.5);
+  --fc-today-bg-color: rgba(15, 118, 110, 0.05);
+  --fc-event-bg-color: #0f766e;
+  --fc-event-border-color: #0f766e;
+  font-family: inherit;
+}
+
+.fc-theme-standard td, .fc-theme-standard th {
+  border: 1px solid var(--fc-border-color);
+}
+
+.fc .fc-scrollgrid {
+  border: none;
+}
+
+.fc .fc-col-header-cell-cushion {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 12px 4px;
+  color: #64748b;
+}
+
+.fc-event {
+  border-radius: 6px;
+  padding: 2px 4px;
+  font-size: 0.8rem;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+
+.fc-event:hover {
+  transform: scale(1.02);
+}
+
+.task-completed {
+  opacity: 0.6;
+  text-decoration: line-through;
+}
+
+/* 隐藏周视图的头部，因为我们自己写了 */
+.fc-header-toolbar {
+  display: none;
+}
+
+.fc .fc-timegrid-slot {
+  height: 3em; /* 增加行高，方便查看 */
+}
+
+.fc .fc-list-event:hover td {
+  background-color: rgba(15, 118, 110, 0.05);
+}
