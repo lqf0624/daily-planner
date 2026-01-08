@@ -85,7 +85,6 @@ const FloatingPomodoro: React.FC = () => {
 
   const startSkipPress = (e: React.PointerEvent) => {
     e.stopPropagation();
-    if (mode === 'work') return;
     setIsPressingSkip(true);
     skipTimerRef.current = setTimeout(() => { skipMode(); setIsPressingSkip(false); }, 1500);
   };
@@ -95,12 +94,14 @@ const FloatingPomodoro: React.FC = () => {
     if (skipTimerRef.current) clearTimeout(skipTimerRef.current);
   };
 
+  // ... (keep time formatting)
   const minutes = Math.floor(timeLeft / 60);
   const seconds = timeLeft % 60;
   const timeText = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
   const ringColor = mode === 'work' ? 'rgba(15, 118, 110, 0.95)' : 'rgba(249, 115, 22, 0.95)';
 
   if (isMiniBar) {
+    // ... (mini bar logic)
     return (
       <div 
         className="h-screen w-screen p-1 select-none flex items-center justify-center overflow-hidden"
@@ -123,12 +124,23 @@ const FloatingPomodoro: React.FC = () => {
               {timeText}
             </div>
           </div>
-          <button 
-            onClick={(e) => { e.stopPropagation(); setIsMiniBar(false); }} 
-            className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer active:scale-90"
-          >
-            <Maximize2 size={12} />
-          </button>
+          <div className="flex items-center gap-1">
+            <button 
+              onPointerDown={startSkipPress} 
+              onPointerUp={cancelSkipPress} 
+              onPointerLeave={cancelSkipPress}
+              className={cn("p-1 transition-colors cursor-pointer active:scale-90", isPressingSkip ? "text-primary" : "text-slate-400 hover:text-slate-600")}
+              title="长按跳过当前阶段"
+            >
+              <FastForward size={12} />
+            </button>
+            <button 
+              onClick={(e) => { e.stopPropagation(); setIsMiniBar(false); }} 
+              className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer active:scale-90"
+            >
+              <Maximize2 size={12} />
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -158,7 +170,7 @@ const FloatingPomodoro: React.FC = () => {
 
           <div
             className="relative flex h-[120px] w-[120px] items-center justify-center rounded-full p-[6px]"
-            style={{ background: `conic-gradient(${ringColor} ${Math.round((1 - timeLeft / (pomodoroSettings.workDuration * 60)) * 360)}deg, rgba(226, 232, 240, 0.4) 0deg)`, touchAction: 'none' }}
+            style={{ background: `conic-gradient(${ringColor} ${Math.round((1 - timeLeft / (mode === 'work' ? pomodoroSettings.workDuration * 60 : (mode === 'shortBreak' ? pomodoroSettings.shortBreakDuration * 60 : pomodoroSettings.longBreakDuration * 60))) * 360)}deg, rgba(226, 232, 240, 0.4) 0deg)`, touchAction: 'none' }}
           >
             <div className="relative z-10 flex h-full w-full flex-col items-center justify-center rounded-full border border-white/80 bg-white/90 backdrop-blur-xl">
               <div className="mt-2 text-lg font-semibold tabular-nums text-slate-800">{timeText}</div>
@@ -167,16 +179,18 @@ const FloatingPomodoro: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-1.5">
-            <button onClick={(e) => { e.stopPropagation(); toggleTimer(); }} className={cn("rounded-xl px-3 py-2 text-xs font-semibold transition-all flex items-center gap-1 active:scale-95 cursor-pointer", isActive ? "bg-white/70 text-slate-600 hover:bg-white/90" : "bg-primary text-white hover:bg-primary-dark")}>
+            <button onClick={(e) => { e.stopPropagation(); resetTimer(); }} className="rounded-xl border border-white/70 bg-white/70 px-2.5 py-2 text-slate-500 hover:bg-white/90 transition-all active:scale-95 cursor-pointer" title="重置当前阶段"><RotateCcw size={14} /></button>
+            
+            <button onClick={(e) => { e.stopPropagation(); toggleTimer(); }} className={cn("rounded-xl px-4 py-2 text-xs font-semibold transition-all flex items-center gap-1 active:scale-95 cursor-pointer shadow-sm", isActive ? "bg-white/70 text-slate-600 hover:bg-white/90" : "bg-primary text-white hover:bg-primary-dark shadow-primary/20")}>
               {isActive ? <Pause size={14} /> : <Play size={14} />} {isActive ? '暂停' : '开始'}
             </button>
-            {mode !== 'work' && (
-              <button onPointerDown={startSkipPress} onPointerUp={cancelSkipPress} onPointerLeave={cancelSkipPress} className={cn("relative overflow-hidden rounded-xl border border-white/70 bg-white/70 px-2.5 py-2 text-slate-500 hover:bg-white/90 transition-all active:scale-95 cursor-pointer", isPressingSkip && "text-primary scale-110")} title="长按跳过休息">
-                <FastForward size={14} className="relative z-10" />
-                {isPressingSkip && <div className="absolute bottom-0 left-0 h-1 bg-primary transition-all duration-[1500ms] ease-linear w-full" />}
-              </button>
-            )}
-            <button onClick={(e) => { e.stopPropagation(); resetTimer(); }} className="rounded-xl border border-white/70 bg-white/70 px-2.5 py-2 text-slate-500 hover:bg-white/90 transition-all active:scale-95 cursor-pointer" title="重置"><RotateCcw size={14} /></button>
+
+            <button onPointerDown={startSkipPress} onPointerUp={cancelSkipPress} onPointerLeave={cancelSkipPress} className={cn("relative overflow-hidden rounded-xl border border-white/70 bg-white/70 px-2.5 py-2 text-slate-500 hover:bg-white/90 transition-all active:scale-95 cursor-pointer", isPressingSkip && "text-primary scale-110")} title="长按跳过当前阶段">
+              <FastForward size={14} className="relative z-10" />
+              <div className={cn("absolute inset-0 bg-primary/25 ease-linear", isPressingSkip ? "w-full duration-[1500ms]" : "w-0 duration-100")} />
+              <div className={cn("absolute bottom-0 left-0 h-1 bg-primary ease-linear", isPressingSkip ? "w-full duration-[1500ms]" : "w-0 duration-100")} />
+            </button>
+            
             <button onClick={(e) => { e.stopPropagation(); window.ipcRenderer.send('app:open-tab', 'pomodoro'); }} className="rounded-xl border border-white/70 bg-white/70 px-2.5 py-2 text-slate-500 hover:bg-white/90 transition-all active:scale-95 cursor-pointer" title="打开主窗口"><SquareArrowOutUpRight size={14} /></button>
           </div>
         </div>

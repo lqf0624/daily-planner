@@ -1,8 +1,18 @@
+export type RecurrenceType = 'none' | 'daily' | 'weekly' | 'monthly' | 'workdays';
+
+export interface RecurrenceConfig {
+  type: RecurrenceType;
+  interval?: number; // 每隔多少(天/周/月)
+  daysOfWeek?: number[]; // 周几重复 [0-6]
+  excludeHolidays?: boolean; // 是否避开节假日
+  endDate?: string; // 结束日期
+}
+
 export interface Task {
   id: string;
   title: string;
   description?: string;
-  date: string; // YYYY-MM-DD
+  date: string; // YYYY-MM-DD (对于循环任务，这是首次开始日期)
   startTime?: string; // ISO string or HH:mm
   endTime?: string; // ISO string or HH:mm
   hasTime: boolean; // 是否是定时任务
@@ -13,6 +23,10 @@ export interface Task {
   expectedPomodoros?: number;
   createdAt: string;
   updatedAt: string;
+  
+  recurrence?: RecurrenceConfig; // 循环配置
+  parentTaskId?: string; // 如果是循环生成的实例，指向父任务ID
+  originalDate?: string; // 实例对应的原始日期
 }
 
 export interface Group {

@@ -59,10 +59,21 @@ function formatTime(seconds: number) {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
-function getIconPath() {
-  const iconName = 'electron-vite.svg';
-  const base = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : path.join(app.getAppPath(), 'dist');
-  return path.join(base, iconName);
+function getAppIconPath() {
+  const base = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : RENDERER_DIST;
+  return path.join(base, 'icon.png');
+}
+
+function getTrayIconPath(mode: 'work' | 'shortBreak' | 'longBreak') {
+  const base = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : RENDERER_DIST;
+  const isMac = process.platform === 'darwin';
+  const isWork = mode === 'work';
+  
+  if (isMac) {
+    return path.join(base, isWork ? 'tray-work-mac.png' : 'tray-rest-mac.png');
+  } else {
+    return path.join(base, isWork ? 'tray-work-win.png' : 'tray-rest-win.png');
+  }
 }
 
 function updateTray() {
@@ -73,6 +84,17 @@ function updateTray() {
     tray.setTitle(pomodoroState.isActive ? `${prefix} ${timeStr}` : '');
   }
   tray.setToolTip(`Daily Planner - ${pomodoroState.mode === 'work' ? '专注' : '休息'} [${timeStr}]`);
+  
+  const iconPath = getTrayIconPath(pomodoroState.mode);
+  let icon = nativeImage.createFromPath(iconPath);
+  
+  if (process.platform === 'win32') {
+    icon = icon.resize({ width: 16, height: 16 });
+  } else if (process.platform === 'darwin') {
+    icon = icon.resize({ width: 22, height: 22 });
+    icon.setTemplateImage(true);
+  }
+  tray.setImage(icon);
 }
 
 function broadcastState() {
@@ -82,24 +104,40 @@ function broadcastState() {
   updateTray();
 }
 
-function handleModeComplete() {
+function handleModeComplete(isSkip = false) {
   const settings = pomodoroState.pomodoroSettings;
   let title = '';
   let body = '';
 
   if (pomodoroState.mode === 'work') {
-    pomodoroState.sessionsCompleted += 1;
-    if (win && !win.isDestroyed()) win.webContents.send('pomodoro:log-session', settings.workDuration);
+    // 只有在自然完成时才增加计数，跳过不算
+    if (!isSkip) {
+      pomodoroState.sessionsCompleted += 1;
+      if (win && !win.isDestroyed()) win.webContents.send('pomodoro:log-session', settings.workDuration);
+    }
 
-    if (pomodoroState.sessionsCompleted >= settings.maxSessions) {
+    // 即使达到上限，也可以继续循环。只是如果达到了上限且是自然完成，我们停止自动开始。
+    // 如果是跳过，说明用户想手动控制，继续流转。
+    const reachedMax = pomodoroState.sessionsCompleted >= settings.maxSessions;
+    
+    if (reachedMax && !isSkip && settings.maxSessions > 0) {
+      // 只有在自然完成且达到上限时，才真正“停止”流程
       pomodoroState.isActive = false;
       title = '任务圆满完成';
       body = '恭喜完成今日所有番茄钟！';
-    } else {
+      // 依然切换到休息模式，方便用户继续
       const isLongBreak = pomodoroState.sessionsCompleted % settings.longBreakInterval === 0;
       pomodoroState.mode = isLongBreak ? 'longBreak' : 'shortBreak';
       pomodoroState.timeLeft = (isLongBreak ? settings.longBreakDuration : settings.shortBreakDuration) * 60;
+    } else {
+      // 正常流转
+      const isLongBreak = pomodoroState.sessionsCompleted % settings.longBreakInterval === 0;
+      pomodoroState.mode = isLongBreak ? 'longBreak' : 'shortBreak';
+      pomodoroState.timeLeft = (isLongBreak ? settings.longBreakDuration : settings.shortBreakDuration) * 60;
+      // 只有没达到上限，或者用户手动跳过时，才遵循 autoStartBreaks
+      // 如果达到了上限但用户跳过了，可能意味着用户想强行进入休息，所以也遵循 autoStart
       pomodoroState.isActive = settings.autoStartBreaks;
+      
       title = '专注结束';
       body = isLongBreak ? '进入长休息。' : '短休开始。';
     }
@@ -111,12 +149,17 @@ function handleModeComplete() {
     body = '回到专注。';
   }
 
-  if (Notification.isSupported()) {
-    new Notification({ title, body, icon: getIconPath() }).show();
+  if (Notification.isSupported() && !isSkip) {
+    new Notification({ title, body }).show();
   }
   
-  pomodoroState.popup = { title, message: body };
-  if (!pomodoroState.isActive) stopTimer();
+  pomodoroState.popup = isSkip ? null : { title, message: body };
+  
+  if (pomodoroState.isActive) {
+    startTimer();
+  } else {
+    stopTimer();
+  }
   broadcastState();
 }
 
@@ -139,10 +182,17 @@ function stopTimer() {
 
 function createTray() {
   if (tray) return;
-  const iconPath = getIconPath();
-  const icon = nativeImage.createFromPath(iconPath);
-  const trayIcon = icon.isEmpty() ? nativeImage.createEmpty() : icon.resize({ width: 16, height: 16 });
-  tray = new Tray(trayIcon);
+  const iconPath = getTrayIconPath(pomodoroState.mode);
+  
+  let icon = nativeImage.createFromPath(iconPath);
+  if (process.platform === 'win32') {
+    icon = icon.resize({ width: 16, height: 16 });
+  } else if (process.platform === 'darwin') {
+    icon = icon.resize({ width: 22, height: 22 });
+    icon.setTemplateImage(true);
+  }
+  
+  tray = new Tray(icon);
   
   const updateMenu = () => {
     const contextMenu = Menu.buildFromTemplate([
@@ -179,7 +229,7 @@ function toggleFloatingWindow() {
 
 function createWindow() {
   win = new BrowserWindow({
-    icon: getIconPath(), width: 1200, height: 800,
+    icon: getAppIconPath(), width: 1200, height: 800,
     frame: false, transparent: true, backgroundColor: '#00000000',
     webPreferences: { preload: path.join(__dirname, 'preload.mjs'), backgroundThrottling: false }
   });
@@ -195,6 +245,7 @@ function createFloatingWindow() {
     width: 220, height: 220,
     x: width - 240, y: height - 240,
     frame: false, transparent: true, alwaysOnTop: true, skipTaskbar: true,
+    resizable: false,
     backgroundColor: '#00000000',
     webPreferences: { preload: path.join(__dirname, 'preload.mjs'), backgroundThrottling: false }
   });
@@ -215,13 +266,14 @@ ipcMain.handle('app:check-update', async () => {
     const options = {
       hostname: 'api.github.com',
       path: '/repos/lqf0624/daily-planner-ai/releases/latest',
-      headers: { 'User-Agent': 'Daily-Planner-AI' }
+      headers: { 'User-Agent': 'Daily-Planner-AI', 'Cache-Control': 'no-cache' }
     };
     https.get(options, (res) => {
       let data = '';
       res.on('data', (chunk) => data += chunk);
       res.on('end', () => {
         try {
+          if (res.statusCode !== 200) { resolve(null); return; }
           const release = JSON.parse(data);
           const version = release.tag_name.replace('v', '');
           const platformExt = process.platform === 'win32' ? '.exe' : '.dmg';
@@ -249,7 +301,7 @@ ipcMain.on('app:start-download', (event, url) => {
       res.on('data', (chunk) => {
         downloadedSize += chunk.length;
         file.write(chunk);
-        event.reply('app:download-progress', totalSize ? Math.round((downloadedSize / totalSize) * 100) : 0);
+        if (totalSize) event.reply('app:download-progress', Math.round((downloadedSize / totalSize) * 100));
       });
       res.on('end', () => {
         file.end();
@@ -269,18 +321,33 @@ ipcMain.on('app:install-update', (_event, filePath) => { shell.openPath(filePath
 ipcMain.on('floating:toggle', () => toggleFloatingWindow());
 ipcMain.on('floating:show', () => { if (floatingWin) floatingWin.show(); else createFloatingWindow(); });
 ipcMain.on('floating:resize', (_event, size) => {
-  if (floatingWin) {
-    const [oldWidth, oldHeight] = floatingWin.getSize();
-    const [oldX, oldY] = floatingWin.getPosition();
-    floatingWin.setBounds({ x: oldX + (oldWidth - size.width), y: oldY + (oldHeight - size.height), width: size.width, height: size.height });
+  if (floatingWin && !floatingWin.isDestroyed()) {
+    const [currentW, currentH] = floatingWin.getSize();
+    if (currentW !== size.width || currentH !== size.height) {
+      const [oldX, oldY] = floatingWin.getPosition();
+      const newX = oldX + (currentW - size.width);
+      const newY = oldY + (currentH - size.height);
+      floatingWin.setBounds({ x: newX, y: newY, width: size.width, height: size.height });
+    }
   }
 });
 
 ipcMain.on('pomodoro:action', (_, action) => {
   switch (action.type) {
     case 'toggle': pomodoroState.isActive = !pomodoroState.isActive; if (pomodoroState.isActive) startTimer(); else stopTimer(); break;
-    case 'reset': pomodoroState.isActive = false; pomodoroState.timeLeft = pomodoroState.pomodoroSettings.workDuration * 60; stopTimer(); break;
-    case 'skip': if (pomodoroState.mode !== 'work') handleModeComplete(); break;
+    case 'reset': 
+      pomodoroState.isActive = false; 
+      // 根据当前模式重置对应的时间
+      if (pomodoroState.mode === 'work') {
+        pomodoroState.timeLeft = pomodoroState.pomodoroSettings.workDuration * 60;
+      } else if (pomodoroState.mode === 'shortBreak') {
+        pomodoroState.timeLeft = pomodoroState.pomodoroSettings.shortBreakDuration * 60;
+      } else if (pomodoroState.mode === 'longBreak') {
+        pomodoroState.timeLeft = pomodoroState.pomodoroSettings.longBreakDuration * 60;
+      }
+      stopTimer(); 
+      break;
+    case 'skip': handleModeComplete(true); break;
     case 'dismissPopup': pomodoroState.popup = null; break;
     case 'updateSettings': pomodoroState.pomodoroSettings = { ...pomodoroState.pomodoroSettings, ...action.settings }; if (!pomodoroState.isActive) pomodoroState.timeLeft = pomodoroState.pomodoroSettings.workDuration * 60; break;
   }

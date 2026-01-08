@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Play, Pause, RotateCcw, Settings as SettingsIcon, Monitor, AlertCircle } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Play, Pause, RotateCcw, Settings as SettingsIcon, Monitor, AlertCircle, FastForward } from 'lucide-react';
 import { usePomodoro } from '../contexts/PomodoroContext';
 import { cn } from '../utils/cn';
 
@@ -13,9 +13,25 @@ const PomodoroTimer: React.FC = () => {
     sessionsCompleted,
     toggleTimer,
     resetTimer,
+    skipMode,
   } = usePomodoro();
   const [showSettings, setShowSettings] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  
+  // 长按跳过逻辑
+  const [isPressingSkip, setIsPressingSkip] = useState(false);
+  const skipTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const startSkipPress = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    setIsPressingSkip(true);
+    skipTimerRef.current = setTimeout(() => { skipMode(); setIsPressingSkip(false); }, 1500);
+  };
+
+  const cancelSkipPress = () => {
+    setIsPressingSkip(false);
+    if (skipTimerRef.current) clearTimeout(skipTimerRef.current);
+  };
 
   const toggleFloatingWindow = () => {
     if (typeof window !== 'undefined' && window.ipcRenderer) {
@@ -41,6 +57,7 @@ const PomodoroTimer: React.FC = () => {
 
   return (
     <div className="flex flex-col items-center justify-center h-full space-y-8 relative">
+      {/* ... (keep headers) */}
       <button 
         onClick={toggleFloatingWindow}
         className="absolute top-0 left-0 p-2 text-slate-400 hover:text-primary transition-colors"
@@ -83,6 +100,7 @@ const PomodoroTimer: React.FC = () => {
       )}
 
       {showSettings ? (
+        // ... (keep settings view)
         <div className="w-full max-w-md bg-slate-50 p-6 rounded-2xl border border-slate-200 space-y-4 animate-in fade-in zoom-in-95">
           <h4 className="font-bold border-b pb-2 mb-4">番茄钟设置</h4>
           <div className="grid grid-cols-2 gap-4">
@@ -149,8 +167,8 @@ const PomodoroTimer: React.FC = () => {
       ) : (
         <>
           <div className="flex bg-slate-100 p-1 rounded-2xl">
-            <button className={cn("px-6 py-2 rounded-xl transition-all", mode === 'work' ? "bg-white shadow-sm text-primary font-bold" : "text-slate-500")}>专注</button>
-            <button className={cn("px-6 py-2 rounded-xl transition-all", mode !== 'work' ? "bg-white shadow-sm text-secondary font-bold" : "text-slate-500")}>休息</button>
+            <div className={cn("px-6 py-2 rounded-xl transition-all", mode === 'work' ? "bg-white shadow-sm text-primary font-bold" : "text-slate-500 opacity-50")}>专注</div>
+            <div className={cn("px-6 py-2 rounded-xl transition-all", mode !== 'work' ? "bg-white shadow-sm text-secondary font-bold" : "text-slate-500 opacity-50")}>休息</div>
           </div>
 
           <div className="text-[120px] font-bold tabular-nums text-slate-800 leading-none">
@@ -158,24 +176,39 @@ const PomodoroTimer: React.FC = () => {
           </div>
 
           <div className="flex flex-col items-center gap-4">
-            <div className="flex gap-4">
+            <div className="flex items-center gap-6">
+              <button
+                onClick={handleResetClick}
+                className="w-16 h-16 rounded-2xl bg-slate-100 text-slate-400 hover:bg-slate-200 flex items-center justify-center transition-all"
+                title="重置当前阶段"
+              >
+                <RotateCcw size={28} />
+              </button>
+
               <button
                 onClick={toggleTimer}
                 className={cn(
-                  "w-20 h-20 rounded-3xl flex items-center justify-center transition-all",
-                  isActive ? "bg-slate-200 text-slate-600" : "bg-primary text-white shadow-xl shadow-primary/30 scale-110"
+                  "w-24 h-24 rounded-[32px] flex items-center justify-center transition-all",
+                  isActive ? "bg-slate-200 text-slate-600" : "bg-primary text-white shadow-2xl shadow-primary/30 scale-110"
                 )}
               >
-                {isActive ? <Pause size={32} /> : <Play size={32} className="ml-1" />}
+                {isActive ? <Pause size={40} /> : <Play size={40} className="ml-1" />}
               </button>
+
               <button
-                onClick={handleResetClick}
-                className="w-20 h-20 rounded-3xl bg-slate-100 text-slate-400 hover:bg-slate-200 flex items-center justify-center transition-all"
+                onPointerDown={startSkipPress}
+                onPointerUp={cancelSkipPress}
+                onPointerLeave={cancelSkipPress}
+                className={cn("relative w-16 h-16 rounded-2xl bg-slate-100 text-slate-400 hover:bg-slate-200 flex items-center justify-center transition-all overflow-hidden", isPressingSkip && "text-primary scale-105")}
+                title="长按跳过当前阶段"
               >
-                <RotateCcw size={32} />
+                <FastForward size={28} className="relative z-10" />
+                <div className={cn("absolute inset-0 bg-primary/25 ease-linear", isPressingSkip ? "w-full duration-[1500ms]" : "w-0 duration-100")} />
+                <div className={cn("absolute bottom-0 left-0 h-1 bg-primary ease-linear", isPressingSkip ? "w-full duration-[1500ms]" : "w-0 duration-100")} />
               </button>
             </div>
             
+            {/* ... (keep stats) */}
             <div className="flex items-center gap-2 mt-4">
               {Array.from({ length: pomodoroSettings.maxSessions }).map((_, i) => (
                 <div 

@@ -20,7 +20,7 @@ const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
   const [updateInfo, setUpdateInfo] = useState<{ version: string, url: string, notes?: string } | null>(null);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloadPath, setDownloadPath] = useState('');
-  const [currentVersion, setCurrentVersion] = useState('0.1.14');
+  const [currentVersion, setCurrentVersion] = useState('');
 
   useEffect(() => {
     if (!window.ipcRenderer) return;
@@ -62,16 +62,22 @@ const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
     setUpdateStatus('checking');
     try {
       const result = await window.ipcRenderer.invoke('app:check-update') as { version: string, url: string, notes?: string } | null;
-      // 关键修复：对比版本号，去掉 'v' 前缀
-      if (result && result.version !== currentVersion) {
-        setUpdateInfo(result);
-        setUpdateStatus('available');
+      if (result) {
+        if (result.version !== currentVersion) {
+          setUpdateInfo(result);
+          setUpdateStatus('available');
+        } else {
+          setUpdateStatus('latest');
+          setTimeout(() => setUpdateStatus('idle'), 3000);
+        }
       } else {
-        setUpdateStatus('latest');
+        setUpdateStatus('error');
         setTimeout(() => setUpdateStatus('idle'), 3000);
       }
-    } catch (e) {
+    } catch (error: unknown) {
+      console.error('Check update error:', error);
       setUpdateStatus('error');
+      setTimeout(() => setUpdateStatus('idle'), 3000);
     }
   };
 
@@ -153,10 +159,11 @@ const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
             <h3 className="text-xl font-bold text-slate-800">{language === 'zh-CN' ? '系统设置' : 'System Settings'}</h3>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Preferences</p>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-white/70 rounded-full"><X size={20} /></button>
+          <button onClick={onClose} className="p-2 hover:bg-white/70 rounded-full cursor-pointer"><X size={20} /></button>
         </div>
 
         <div className="space-y-8">
+          {/* Language Settings */}
           <section>
             <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">{language === 'zh-CN' ? '通用设置' : 'General'}</h4>
             <div className="bg-white/70 border border-white/60 rounded-2xl p-4">
@@ -173,6 +180,7 @@ const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
             </div>
           </section>
 
+          {/* AI Settings */}
           <section>
             <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">{language === 'zh-CN' ? 'AI 助手配置 (OpenAI 风格)' : 'AI Assistant (OpenAI Style)'}</h4>
             <div className="space-y-4 bg-white/70 border border-white/60 rounded-2xl p-4">
@@ -197,6 +205,7 @@ const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
             </div>
           </section>
 
+          {/* Data Management */}
           <section>
             <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">{language === 'zh-CN' ? '数据管理' : 'Data Management'}</h4>
             <div className="bg-white/70 border border-white/60 rounded-2xl p-4">
@@ -211,7 +220,7 @@ const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
                     <button onClick={handleClearHistory} className="px-3 py-1.5 text-xs font-bold bg-red-500 text-white rounded-lg shadow-lg">确定清空</button>
                   </div>
                 ) : (
-                  <button onClick={() => setShowConfirmClear(true)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all flex items-center gap-1.5 text-sm">
+                  <button onClick={() => setShowConfirmClear(true)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all flex items-center gap-1.5 text-sm cursor-pointer">
                     <Trash2 size={16} /> {language === 'zh-CN' ? '清空记录' : 'Clear Logs'}
                   </button>
                 )}
@@ -219,6 +228,7 @@ const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
             </div>
           </section>
 
+          {/* About Section */}
           <section>
             <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">{language === 'zh-CN' ? '关于应用' : 'About'}</h4>
             <div className="bg-white/70 border border-white/60 rounded-2xl p-4 space-y-3">
@@ -228,16 +238,20 @@ const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
                   <span className="text-sm font-medium text-slate-700">{language === 'zh-CN' ? '当前版本' : 'Version'}</span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="text-sm font-bold text-primary bg-primary/5 px-2 py-0.5 rounded-full">v{currentVersion}</span>
+                  <span className="text-sm font-bold text-primary bg-primary/5 px-2 py-0.5 rounded-full">v{currentVersion || '...'}</span>
                   <button 
                     onClick={checkUpdate} 
                     disabled={updateStatus === 'checking'}
                     className={cn(
                       "text-[10px] font-bold uppercase tracking-tighter px-2 py-1 rounded-md transition-all cursor-pointer",
-                      updateStatus === 'latest' ? "bg-secondary/10 text-secondary" : "bg-slate-100 text-slate-500 hover:bg-primary hover:text-white"
+                      updateStatus === 'latest' ? "bg-secondary/10 text-secondary" : 
+                      updateStatus === 'error' ? "bg-red-100 text-red-500" :
+                      "bg-slate-100 text-slate-500 hover:bg-primary hover:text-white"
                     )}
                   >
-                    {updateStatus === 'checking' ? '检查中...' : updateStatus === 'latest' ? '已是最新' : '检查更新'}
+                    {updateStatus === 'checking' ? '检查中...' : 
+                     updateStatus === 'latest' ? '已是最新' : 
+                     updateStatus === 'error' ? '检查失败' : '检查更新'}
                   </button>
                 </div>
               </div>

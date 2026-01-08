@@ -13,12 +13,14 @@ import {
   Search,
   Check,
   Clock,
-  Layers
+  Layers,
+  Repeat
 } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
 import { cn } from '../utils/cn';
-import { format, parseISO, addDays, differenceInMinutes, addMinutes } from 'date-fns';
-import { Task } from '../types';
+import { format, parseISO, addDays, differenceInMinutes, addMinutes, getDay, getDate } from 'date-fns';
+import { Task, RecurrenceType } from '../types';
+import { isWorkday, isHoliday } from '../utils/holidays';
 
 const DailyPlanner: React.FC = () => {
   const { tasks, addTask, updateTask, deleteTask, groups, addGroup, deleteGroup } = useAppStore();
@@ -36,6 +38,11 @@ const DailyPlanner: React.FC = () => {
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('10:00');
   const [selectedGroupId, setSelectedGroupId] = useState(groups[0]?.id || 'work');
+  
+  // 循环日程状态
+  const [recurrenceType, setRecurrenceType] = useState<RecurrenceType>('none');
+  const [excludeHolidays, setExcludeHolidays] = useState(false);
+
   const [searchQuery, setSearchQuery] = useState('');
   const [showCompleted, setShowCompleted] = useState(true);
 
@@ -66,7 +73,56 @@ const DailyPlanner: React.FC = () => {
     }
   }, [groups, selectedGroupId]);
 
-  const dayTasks = tasks.filter(t => t.date === selectedDate);
+  // 判断循环任务是否应该在指定日期显示
+  const shouldShowRecurringTask = React.useCallback((task: Task, targetDate: string) => {
+    if (!task.recurrence || task.recurrence.type === 'none') return false;
+    
+    // 循环任务的原始开始日期必须在目标日期之前或当天
+    if (task.date > targetDate) return false;
+    
+    // 检查结束日期
+    if (task.recurrence.endDate && targetDate > task.recurrence.endDate) return false;
+
+    // 检查是否被例外实例覆盖
+    const isOverridden = tasks.some(t => t.parentTaskId === task.id && t.originalDate === targetDate);
+    if (isOverridden) return false;
+
+    const targetDateObj = parseISO(targetDate);
+
+    // 检查节假日排除
+    if (task.recurrence.excludeHolidays && isHoliday(targetDate)) return false;
+
+    switch (task.recurrence.type) {
+      case 'daily':
+        return true;
+      case 'weekly':
+        return getDay(parseISO(task.date)) === getDay(targetDateObj);
+      case 'monthly':
+        return getDate(parseISO(task.date)) === getDate(targetDateObj);
+      case 'workdays':
+        return isWorkday(targetDate);
+      default:
+        return false;
+    }
+  }, [tasks]);
+
+  // 核心逻辑：获取当日任务列表（包含具体的当日任务 + 符合条件的循环任务投影）
+  const dayTasks = useMemo(() => {
+    // 1. 获取明确指定日期的任务 (包括普通任务和循环任务的例外实例)
+    const exactTasks = tasks.filter(t => t.date === selectedDate);
+    
+    // 2. 获取所有循环主任务，并筛选出在当天生效的
+    const recurringTasks = tasks.filter(t => 
+      t.id && // type check
+      t.recurrence && 
+      t.recurrence.type !== 'none' &&
+      shouldShowRecurringTask(t, selectedDate)
+    );
+
+    // 3. 合并列表
+    return [...exactTasks, ...recurringTasks];
+  }, [tasks, selectedDate, shouldShowRecurringTask]);
+
   const filteredTasks = dayTasks.filter(t => {
     const matchesGroup = filterGroupId === 'all' || t.groupId === filterGroupId;
     const matchesQuery = !searchQuery.trim() || [t.title, t.description].some(field => field?.toLowerCase().includes(searchQuery.toLowerCase()));
@@ -76,7 +132,18 @@ const DailyPlanner: React.FC = () => {
 
   const timedTasks = [...filteredTasks]
     .filter(t => t.hasTime && t.startTime)
-    .sort((a, b) => parseISO(a.startTime!).getTime() - parseISO(b.startTime!).getTime());
+    .sort((a, b) => {
+       // 处理循环任务投影的时间比较：需要将 ISO 时间中的日期部分替换为 selectedDate 才能正确排序
+       const getTaskTime = (task: Task) => {
+         if (!task.startTime) return 0;
+         if (task.date === selectedDate) return parseISO(task.startTime).getTime();
+         // 这是一个循环任务投影，我们需要构造当天的比较时间
+         const timePart = format(parseISO(task.startTime), 'HH:mm:ss');
+         return parseISO(`${selectedDate}T${timePart}`).getTime();
+       };
+       return getTaskTime(a) - getTaskTime(b);
+    });
+    
   const floatingTasks = filteredTasks.filter(t => !t.hasTime);
 
   const dayStats = useMemo(() => {
@@ -106,6 +173,8 @@ const DailyPlanner: React.FC = () => {
     setHasTime(false);
     setStartTime('09:00');
     setEndTime('10:00');
+    setRecurrenceType('none');
+    setExcludeHolidays(false);
     setEditingTaskId(null);
   };
 
@@ -130,6 +199,11 @@ const DailyPlanner: React.FC = () => {
     }
 
     if (editingTaskId) {
+      // 检查是否是编辑循环任务的投影（即 parentTaskId 还是原始 ID？）
+      // 目前简化逻辑：如果是在列表点击编辑，我们会传入该任务的 ID。
+      // 如果它是循环任务的主体，修改它会影响所有实例。
+      // TODO: 未来可以提示用户“仅修改当前”还是“修改所有后续”。
+      // 目前默认：如果编辑的是循环任务本身，则修改规则。
       updateTask(editingTaskId, {
         title: newTaskTitle,
         description: newTaskDescription,
@@ -139,6 +213,10 @@ const DailyPlanner: React.FC = () => {
         endTime: endISO,
         groupId: selectedGroupId,
         updatedAt: new Date().toISOString(),
+        recurrence: {
+          type: recurrenceType,
+          excludeHolidays
+        }
       });
     } else {
       addTask({
@@ -155,6 +233,10 @@ const DailyPlanner: React.FC = () => {
         pomodoroCount: 0,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
+        recurrence: {
+          type: recurrenceType,
+          excludeHolidays
+        }
       });
     }
     resetForm();
@@ -167,20 +249,58 @@ const DailyPlanner: React.FC = () => {
     setNewTaskDescription(task.description || '');
     setHasTime(task.hasTime);
     if (task.hasTime && task.startTime) {
-      setStartTime(format(parseISO(task.startTime), 'HH:mm'));
-      setEndTime(task.endTime ? format(parseISO(task.endTime), 'HH:mm') : '10:00');
+      // 处理跨天显示时的时间提取
+      const datePart = task.date === selectedDate ? task.startTime : `${selectedDate}T${format(parseISO(task.startTime), 'HH:mm:ss')}`;
+      setStartTime(format(parseISO(datePart), 'HH:mm'));
+      
+      if (task.endTime) {
+         const endDatePart = task.date === selectedDate ? task.endTime : `${selectedDate}T${format(parseISO(task.endTime), 'HH:mm:ss')}`;
+         setEndTime(format(parseISO(endDatePart), 'HH:mm'));
+      } else {
+         setEndTime('10:00');
+      }
     }
     setSelectedGroupId(task.groupId);
+    // 加载循环设置
+    setRecurrenceType(task.recurrence?.type || 'none');
+    setExcludeHolidays(task.recurrence?.excludeHolidays || false);
+    
     setIsAdding(true);
+  };
+
+  const handleTaskCompletion = (task: Task) => {
+    // 如果是循环任务的投影（即当前显示的 task 是主任务，但 date 不是 selectedDate）
+    // 我们需要创建一个新的“例外实例”来标记这一天的完成状态
+    if (task.recurrence && task.recurrence.type !== 'none' && task.date !== selectedDate) {
+      // 创建例外实例
+      addTask({
+        ...task,
+        id: crypto.randomUUID(),
+        date: selectedDate, // 锁定到今天
+        isCompleted: !task.isCompleted, // 切换状态
+        parentTaskId: task.id, // 关联父任务
+        originalDate: selectedDate,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        recurrence: undefined // 实例本身不再循环
+      });
+    } else {
+      // 普通任务或已经是例外实例，直接更新
+      updateTask(task.id, { isCompleted: !task.isCompleted });
+    }
   };
 
   const renderTaskCard = (task: Task) => {
     const group = groups.find(g => g.id === task.groupId);
     const start = task.startTime ? format(parseISO(task.startTime), 'HH:mm') : null;
     const end = task.endTime ? format(parseISO(task.endTime), 'HH:mm') : null;
+    
+    // 检查是否是循环任务投影
+    const isRecurringProjection = task.recurrence && task.recurrence.type !== 'none' && task.date !== selectedDate;
+    
     return (
-      <div key={task.id} className="group flex items-start gap-3 rounded-2xl border border-white/60 bg-white/80 p-4 shadow-sm transition-all hover:shadow-md">
-        <button onClick={() => updateTask(task.id, { isCompleted: !task.isCompleted })} className="mt-1">
+      <div key={task.id} className={cn("group flex items-start gap-3 rounded-2xl border bg-white/80 p-4 shadow-sm transition-all hover:shadow-md", isRecurringProjection ? "border-primary/20 bg-primary/5" : "border-white/60")}>
+        <button onClick={() => handleTaskCompletion(task)} className="mt-1">
           {task.isCompleted ? <CheckCircle2 className="text-secondary" size={20} /> : <Circle size={20} className="text-slate-300" />}
         </button>
         <div className="flex-1 min-w-0">
@@ -198,6 +318,15 @@ const DailyPlanner: React.FC = () => {
           )}
           <div className="mt-2 flex items-center gap-2 text-[10px] uppercase tracking-widest text-slate-400">
             <Layers size={12} /> {group?.name || '未分类'}
+            {task.recurrence && task.recurrence.type !== 'none' && (
+              <span className="flex items-center gap-0.5 ml-2 text-primary/60" title="循环任务">
+                <Repeat size={10} /> 
+                {task.recurrence.type === 'daily' ? '每天' : 
+                 task.recurrence.type === 'weekly' ? '每周' : 
+                 task.recurrence.type === 'monthly' ? '每月' : 
+                 task.recurrence.type === 'workdays' ? '工作日' : ''}
+              </span>
+            )}
           </div>
         </div>
         <div className="flex flex-col opacity-0 group-hover:opacity-100 transition-opacity">
@@ -340,31 +469,66 @@ const DailyPlanner: React.FC = () => {
           </div>
           <input autoFocus type="text" value={newTaskTitle} onChange={e => setNewTaskTitle(e.target.value)} placeholder="输入任务名称..." className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary/40" />
           <textarea value={newTaskDescription} onChange={e => setNewTaskDescription(e.target.value)} placeholder="补充说明（可选）" rows={3} className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-primary/40" />
-          <div className="flex flex-wrap items-center justify-between gap-4 text-sm">
-            <label className="flex items-center gap-2 text-slate-600">
-              <input type="checkbox" checked={hasTime} onChange={e => setHasTime(e.target.checked)} /> 设定时间
-            </label>
-            {hasTime && (
-              <div className="flex items-center gap-2">
-                <input type="time" value={startTime} step={900} onChange={e => setStartTime(e.target.value)} className="border border-slate-200 bg-white/80 p-2 rounded-xl text-sm" />
-                <span>-</span>
-                <input type="time" value={endTime} step={900} min={startTime} onChange={e => setEndTime(e.target.value)} className="border border-slate-200 bg-white/80 p-2 rounded-xl text-sm" />
-              </div>
-            )}
-            <select value={selectedGroupId} onChange={e => setSelectedGroupId(e.target.value)} className="p-2 rounded-xl border text-xs">
-              {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-            </select>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+            <div className="space-y-3">
+              <label className="flex items-center gap-2 text-slate-600 font-medium">
+                <input type="checkbox" checked={hasTime} onChange={e => setHasTime(e.target.checked)} className="rounded text-primary focus:ring-primary" /> 
+                <Clock size={16} /> 设定时间
+              </label>
+              {hasTime && (
+                <div className="flex items-center gap-2 pl-6">
+                  <input type="time" value={startTime} step={900} onChange={e => setStartTime(e.target.value)} className="border border-slate-200 bg-white/80 p-2 rounded-xl text-sm" />
+                  <span className="text-slate-400">-</span>
+                  <input type="time" value={endTime} step={900} min={startTime} onChange={e => setEndTime(e.target.value)} className="border border-slate-200 bg-white/80 p-2 rounded-xl text-sm" />
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-3">
+               <label className="flex items-center gap-2 text-slate-600 font-medium">
+                 <Repeat size={16} /> 循环设置
+               </label>
+               <div className="flex items-center gap-2 pl-6">
+                 <select value={recurrenceType} onChange={e => setRecurrenceType(e.target.value as RecurrenceType)} className="p-2 rounded-xl border border-slate-200 bg-white/80 text-xs w-full">
+                   <option value="none">不循环</option>
+                   <option value="daily">每天</option>
+                   <option value="workdays">工作日 (周一至周五 + 调休)</option>
+                   <option value="weekly">每周 (周{['日','一','二','三','四','五','六'][new Date(selectedDate).getDay()]})</option>
+                   <option value="monthly">每月 ({new Date(selectedDate).getDate()}日)</option>
+                 </select>
+               </div>
+               {recurrenceType !== 'none' && (
+                 <label className="flex items-center gap-2 text-xs text-slate-500 pl-6 cursor-pointer">
+                   <input type="checkbox" checked={excludeHolidays} onChange={e => setExcludeHolidays(e.target.checked)} className="rounded text-primary focus:ring-primary" />
+                   跳过法定节假日
+                 </label>
+               )}
+            </div>
           </div>
-          <div className="flex justify-end gap-2">
-            <button type="button" onClick={() => { resetForm(); setIsAdding(false); }} className="px-3 py-2 text-slate-500 text-sm">取消</button>
-            <button type="submit" className="px-4 py-2 bg-primary text-white rounded-xl text-sm font-bold flex items-center gap-2">
-              <Check size={16} /> 保存
-            </button>
+
+          <div className="flex flex-wrap items-center justify-between gap-4 pt-2 border-t border-slate-100">
+             <div className="flex items-center gap-2">
+               <Layers size={16} className="text-slate-400" />
+               <select value={selectedGroupId} onChange={e => setSelectedGroupId(e.target.value)} className="p-2 rounded-xl border border-slate-200 text-sm bg-white/80">
+                 {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+               </select>
+             </div>
+
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => { resetForm(); setIsAdding(false); }} className="px-3 py-2 text-slate-500 text-sm hover:bg-slate-100 rounded-xl transition-colors">取消</button>
+              <button type="submit" className="px-4 py-2 bg-primary text-white rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-primary-dark transition-all shadow-lg shadow-primary/20">
+                <Check size={16} /> 保存
+              </button>
+            </div>
           </div>
         </form>
       ) : (
-        <button onClick={() => { setIsAdding(true); setEditingTaskId(null); }} className="w-full py-3 border-2 border-dashed border-slate-200 rounded-2xl text-slate-400 hover:border-primary hover:text-primary transition-all text-sm font-medium flex items-center justify-center gap-2">
-          <Plus size={16} /> 添加任务
+        <button onClick={() => { setIsAdding(true); setEditingTaskId(null); }} className="w-full py-3 border-2 border-dashed border-slate-200 rounded-2xl text-slate-400 hover:border-primary hover:text-primary transition-all text-sm font-medium flex items-center justify-center gap-2 group">
+          <div className="p-1 rounded-full bg-slate-100 group-hover:bg-primary/10 transition-colors">
+            <Plus size={16} /> 
+          </div>
+          添加新任务
         </button>
       )}
 
@@ -388,8 +552,10 @@ const DailyPlanner: React.FC = () => {
         )}
 
         {filteredTasks.length === 0 && (
-          <div className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-slate-400">
-            今天还没有任务，先来安排一件重要的事吧。
+          <div className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-slate-400 flex flex-col items-center gap-2">
+            <CalendarIcon size={32} className="text-slate-200 mb-2" />
+            <p>今天还没有任务</p>
+            <p className="text-xs">点击上方“添加新任务”来规划这一天吧</p>
           </div>
         )}
       </div>

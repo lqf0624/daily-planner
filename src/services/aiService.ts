@@ -1,5 +1,7 @@
 import axios from 'axios';
 import { AISettings, Task, QuarterlyGoal, WeeklyPlan, Habit } from '../types';
+import { isWorkday, isHoliday } from '../utils/holidays';
+import { parseISO, getDay, getDate } from 'date-fns';
 
 interface AIContext {
   tasks: Task[];
@@ -52,6 +54,24 @@ const isHabitDue = (habit: Habit, dateStr: string): boolean => {
   return false;
 };
 
+// 复用 DailyPlanner 中的循环判断逻辑
+const checkRecurrence = (task: Task, targetDate: string): boolean => {
+  if (!task.recurrence || task.recurrence.type === 'none') return false;
+  if (task.date > targetDate) return false;
+  if (task.recurrence.endDate && targetDate > task.recurrence.endDate) return false;
+  if (task.recurrence.excludeHolidays && isHoliday(targetDate)) return false;
+
+  const targetDateObj = parseISO(targetDate);
+
+  switch (task.recurrence.type) {
+    case 'daily': return true;
+    case 'weekly': return getDay(parseISO(task.date)) === getDay(targetDateObj);
+    case 'monthly': return getDate(parseISO(task.date)) === getDate(targetDateObj);
+    case 'workdays': return isWorkday(targetDate);
+    default: return false;
+  }
+};
+
 export const chatWithAI = async (message: string, settings: AISettings, context?: AIContext) => {
   if (!settings.apiKey) {
     throw new Error('请在设置中配置 API Key');
@@ -62,9 +82,34 @@ export const chatWithAI = async (message: string, settings: AISettings, context?
   ];
 
   if (context) {
-    const taskSummary = context.tasks.length > 0 
-      ? context.tasks.map(t => `- [${t.isCompleted ? 'x' : ' '}] ${t.title} (优先级: ${t.groupId === 'work' ? '工作' : '生活'})`).join('\n')
-      : "暂无任务";
+    // 过滤相关任务：今天的任务 + 循环到今天的任务 + 过期未完成的任务
+    const relevantTasks = context.tasks.filter(t => {
+      // 1. 精确匹配今天的任务 (包括循环任务的例外实例)
+      if (t.date === context.currentDate) return true;
+
+      // 2. 过期未完成的任务 (非循环任务)
+      if (t.date < context.currentDate && !t.isCompleted && (!t.recurrence || t.recurrence.type === 'none')) {
+        return true;
+      }
+
+      // 3. 循环任务 (且今天有效，且没有被例外实例覆盖)
+      if (t.recurrence && t.recurrence.type !== 'none') {
+        const isOverridden = context.tasks.some(sub => sub.parentTaskId === t.id && sub.originalDate === context.currentDate);
+        if (isOverridden) return false; // 已经被具体的例外任务覆盖了
+        return checkRecurrence(t, context.currentDate);
+      }
+
+      return false;
+    });
+
+    const taskSummary = relevantTasks.length > 0 
+      ? relevantTasks.map(t => {
+          const timeInfo = t.hasTime && t.startTime ? ` [${t.startTime.split('T')[1]?.slice(0, 5) || ''}]` : '';
+          const status = t.date < context.currentDate && !t.isCompleted ? '(已过期)' : t.isCompleted ? '(已完成)' : '';
+          const recurrence = t.recurrence && t.recurrence.type !== 'none' ? `[循环: ${t.recurrence.type}]` : '';
+          return `- [${t.isCompleted ? 'x' : ' '}] ${t.title}${timeInfo} ${status} ${recurrence}`;
+        }).join('\n')
+      : "今天暂无任务";
     
     const goalSummary = context.goals.length > 0
       ? context.goals.map(g => `- ${g.title} (进度: ${g.progress}%)`).join('\n')
@@ -83,7 +128,7 @@ export const chatWithAI = async (message: string, settings: AISettings, context?
     const contextMsg = `
 当前日期: ${context.currentDate}
 
-我的任务列表 (Tasks):
+我的今日任务概览 (Tasks):
 ${taskSummary}
 
 我的习惯打卡 (Habits - 今天需要执行的):
