@@ -68,7 +68,7 @@ export const sendMessageToAI = async (message: string, history: ChatMessage[]) =
     };
     addChatMessage(newMessage);
     return aiContent;
-  } catch (error: any) {
+  } catch (error: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
     console.error('AI Service Error:', error);
     throw new Error(error.response?.data?.error?.message || '请求 AI 服务失败，请检查网络或配置');
   }

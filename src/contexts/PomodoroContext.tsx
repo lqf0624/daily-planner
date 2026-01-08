@@ -103,6 +103,7 @@ export const PomodoroProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   return <PomodoroContext.Provider value={value}>{children}</PomodoroContext.Provider>;
 };
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const usePomodoro = () => {
   const context = useContext(PomodoroContext);
   if (!context) throw new Error('usePomodoro must be used within PomodoroProvider');
