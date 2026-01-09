@@ -28,10 +28,10 @@
         "resizable": false,
         "decorations": false,
         "transparent": true,
-        "alwaysOnTop": true,
+        "alwaysOnTop": false,
+        "visible": false,
         "skipTaskbar": true,
         "label": "floating",
-        "visible": false,
         "url": "/?view=floating"
       }
     ],

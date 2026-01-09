@@ -8,7 +8,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::{
-  AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, Emitter,
+  AppHandle, Manager, Emitter,
   tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState}
 };
 use tauri_plugin_notification::NotificationExt;
@@ -143,21 +143,16 @@ fn open_main(handle: AppHandle) {
 #[tauri::command]
 async fn toggle_floating_window(handle: AppHandle) {
   if let Some(window) = handle.get_webview_window("floating") {
-    let _ = window.close();
-  } else {
-    let _ = WebviewWindowBuilder::new(
-      &handle,
-      "floating",
-      WebviewUrl::App("/?view=floating".into())
-    )
-    .title("Floating")
-    .inner_size(220.0, 220.0)
-    .resizable(false)
-    .decorations(false)
-    .transparent(true)
-    .always_on_top(true)
-    .skip_taskbar(true)
-    .build();
+    // 检查是否可见，实现“开关”逻辑
+    let is_visible = window.is_visible().unwrap_or(false);
+    if is_visible {
+      let _ = window.hide();
+    } else {
+      // 动态显示窗口，并可以根据需要在这里设置初始置顶状态
+      // 由于前端按钮会控制置顶，我们这里只需显示即可
+      let _ = window.show();
+      let _ = window.set_focus();
+    }
   }
 }
 
@@ -196,7 +191,6 @@ fn main() {
         config_path,
       });
 
-      // 安全初始化托盘
       let tray_builder = TrayIconBuilder::with_id("main");
       let _ = match app.default_window_icon() {
         Some(icon) => tray_builder.icon(icon.clone()),
