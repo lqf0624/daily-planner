@@ -1,9 +1,10 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { Task, Group, QuarterlyGoal, WeeklyPlan, PomodoroSettings, PomodoroHistory, AISettings, ChatMessage, Habit } from '../types';
+import { Task, Group, QuarterlyGoal, WeeklyPlan, PomodoroSettings, PomodoroHistory, AISettings, ChatMessage, Habit, Deadline, AppNotification } from '../types';
 
 interface AppState {
   tasks: Task[];
+  deadlines: Deadline[];
   groups: Group[];
   goals: QuarterlyGoal[];
   weeklyPlans: WeeklyPlan[];
@@ -12,12 +13,14 @@ interface AppState {
   pomodoroHistory: PomodoroHistory;
   aiSettings: AISettings;
   chatHistory: ChatMessage[];
+  lastNotif: AppNotification | null;
   language: 'zh-CN' | 'en-US';
   isSettingsOpen: boolean;
   isPomodoroMiniPlayer: boolean;
   _hasHydrated: boolean;
   
   setIsSettingsOpen: (isOpen: boolean) => void;
+  setLastNotif: (n: AppNotification | null) => void;
   setIsPomodoroMiniPlayer: (isMini: boolean) => void;
   setHasHydrated: (state: boolean) => void;
   setLanguage: (lang: 'zh-CN' | 'en-US') => void;
@@ -26,6 +29,10 @@ interface AppState {
   addTask: (task: Task) => void;
   updateTask: (id: string, updates: Partial<Task>) => void;
   deleteTask: (id: string) => void;
+
+  addDeadline: (deadline: Deadline) => void;
+  updateDeadline: (id: string, updates: Partial<Deadline>) => void;
+  deleteDeadline: (id: string) => void;
   
   addGroup: (group: Group) => void;
   updateGroup: (id: string, updates: Partial<Group>) => void;
@@ -55,6 +62,7 @@ export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
       tasks: [],
+      deadlines: [],
       groups: [
         { id: 'work', name: '工作', color: '#3b82f6' },
         { id: 'life', name: '生活', color: '#10b981' },
@@ -70,6 +78,8 @@ export const useAppStore = create<AppState>()(
         autoStartBreaks: true,
         autoStartPomodoros: false,
         maxSessions: 8,
+        stopAfterSessions: 0,
+        stopAfterLongBreak: false,
       },
       pomodoroHistory: {},
       aiSettings: {
@@ -80,18 +90,21 @@ export const useAppStore = create<AppState>()(
       chatHistory: [
         { role: 'assistant', content: '你好！我是你的 AI 任务助手。我已经准备好为您服务了。', timestamp: Date.now() }
       ],
+      lastNotif: null,
       language: 'zh-CN',
       isSettingsOpen: false,
       isPomodoroMiniPlayer: false,
       _hasHydrated: false,
 
       setIsSettingsOpen: (isOpen) => set({ isSettingsOpen: isOpen }),
+      setLastNotif: (n) => set({ lastNotif: n }),
       setIsPomodoroMiniPlayer: (isMini) => set({ isPomodoroMiniPlayer: isMini }),
       setHasHydrated: (state) => set({ _hasHydrated: state }),
       setLanguage: (lang) => set({ language: lang }),
       
       importData: (data) => set((state) => ({
         tasks: data.tasks || state.tasks,
+        deadlines: data.deadlines || state.deadlines,
         groups: data.groups || state.groups,
         goals: data.goals || state.goals,
         weeklyPlans: data.weeklyPlans || state.weeklyPlans,
@@ -107,6 +120,12 @@ export const useAppStore = create<AppState>()(
         tasks: state.tasks.map((t) => (t.id === id ? { ...t, ...updates } : t))
       })),
       deleteTask: (id) => set((state) => ({ tasks: state.tasks.filter((t) => t.id !== id) })),
+
+      addDeadline: (deadline) => set((state) => ({ deadlines: [...state.deadlines, deadline] })),
+      updateDeadline: (id, updates) => set((state) => ({
+        deadlines: state.deadlines.map((d) => (d.id === id ? { ...d, ...updates } : d))
+      })),
+      deleteDeadline: (id) => set((state) => ({ deadlines: state.deadlines.filter((d) => d.id !== id) })),
       
       addGroup: (group) => set((state) => ({ groups: [...state.groups, group] })),
       updateGroup: (id, updates) => set((state) => ({

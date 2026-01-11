@@ -1,55 +1,51 @@
-/* 覆盖 FullCalendar 默认样式以匹配应用风格 */
+/* 优化 FullCalendar 样式 */
 .fc {
-  --fc-border-color: rgba(226, 232, 240, 0.5);
-  --fc-today-bg-color: rgba(15, 118, 110, 0.05);
+  --fc-border-color: #f1f5f9;
+  --fc-today-bg-color: #f8fafc;
   --fc-event-bg-color: #0f766e;
   --fc-event-border-color: #0f766e;
   font-family: inherit;
 }
 
-.fc-theme-standard td, .fc-theme-standard th {
-  border: 1px solid var(--fc-border-color);
+/* 缩小事件条的高度和边距 */
+.fc-daygrid-event {
+  margin-top: 1px !important;
+  margin-bottom: 1px !important;
+  padding: 1px 4px !important;
+  border-radius: 4px !important;
+  font-size: 0.7rem !important;
+  min-height: 18px !important;
+  border: none !important;
 }
 
-.fc .fc-scrollgrid {
-  border: none;
+.fc-v-event {
+  border-radius: 6px !important;
+  padding: 2px !important;
 }
+
+.fc-theme-standard td, .fc-theme-standard th {
+  border: 1px solid #f1f5f9;
+}
+
+.fc .fc-scrollgrid { border: none; }
 
 .fc .fc-col-header-cell-cushion {
-  font-size: 0.75rem;
+  font-size: 0.7rem;
+  font-weight: 800;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
-  padding: 12px 4px;
-  color: #64748b;
-}
-
-.fc-event {
-  border-radius: 6px;
-  padding: 2px 4px;
-  font-size: 0.8rem;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-  cursor: pointer;
-  transition: transform 0.1s;
-}
-
-.fc-event:hover {
-  transform: scale(1.02);
+  letter-spacing: 0.05em;
+  padding: 8px 4px;
+  color: #94a3b8;
 }
 
 .task-completed {
-  opacity: 0.6;
+  opacity: 0.4;
   text-decoration: line-through;
 }
 
-/* 隐藏周视图的头部，因为我们自己写了 */
-.fc-header-toolbar {
-  display: none;
-}
+.fc-header-toolbar { display: none; }
 
-.fc .fc-timegrid-slot {
-  height: 3em; /* 增加行高，方便查看 */
-}
+.fc .fc-timegrid-slot { height: 2.5em; }
 
-.fc .fc-list-event:hover td {
-  background-color: rgba(15, 118, 110, 0.05);
-}
+/* 隐藏滚动条但保留功能 */
+.no-scrollbar::-webkit-scrollbar { display: none; }

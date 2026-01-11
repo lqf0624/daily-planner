@@ -1,41 +1,49 @@
-export type RecurrenceType = 'none' | 'daily' | 'weekly' | 'monthly' | 'workdays';
-
-export interface RecurrenceConfig {
-  type: RecurrenceType;
-  interval?: number; // 每隔多少(天/周/月)
-  daysOfWeek?: number[]; // 周几重复 [0-6]
-  excludeHolidays?: boolean; // 是否避开节假日
-  endDate?: string; // 结束日期
-}
+export type RecurrenceFrequency = 'none' | 'daily' | 'weekly' | 'monthly';
 
 export interface Task {
   id: string;
   title: string;
   description?: string;
-  date: string; // YYYY-MM-DD (对于循环任务，这是首次开始日期)
-  startTime?: string; // ISO string or HH:mm
-  endTime?: string; // ISO string or HH:mm
-  hasTime: boolean; // 是否是定时任务
+  date: string;
+  startTime?: string;
+  endTime?: string;
+  hasTime: boolean;
   isCompleted: boolean;
   groupId: string;
   tagIds: string[];
   pomodoroCount: number;
-  expectedPomodoros?: number;
   createdAt: string;
   updatedAt: string;
-  
-  recurrence?: RecurrenceConfig; // 循环配置
-  parentTaskId?: string; // 如果是循环生成的实例，指向父任务ID
-  originalDate?: string; // 实例对应的原始日期
+  recurrence?: {
+    frequency: RecurrenceFrequency;
+    smartWorkdayOnly: boolean;
+    endDate?: string;
+  };
+  isMultiDay?: boolean;
+  endDate?: string;
+}
+
+export interface Deadline {
+  id: string;
+  title: string;
+  date: string;
+  priority: 'low' | 'medium' | 'high';
+  createdAt: string;
+}
+
+export interface Habit {
+  id: string;
+  name: string;
+  frequency: 'daily' | 'weekly' | 'custom';
+  customDays: number[];
+  smartWorkdayOnly: boolean;
+  reminderTime?: string;
+  color: string;
+  completedDates: string[];
+  createdAt: string;
 }
 
 export interface Group {
-  id: string;
-  name: string;
-  color: string;
-}
-
-export interface Tag {
   id: string;
   name: string;
   color: string;
@@ -76,6 +84,9 @@ export interface PomodoroSettings {
   autoStartBreaks: boolean;
   autoStartPomodoros: boolean;
   maxSessions: number;
+  // 新增：自动停止逻辑
+  stopAfterSessions: number; // 0 表示不限制
+  stopAfterLongBreak: boolean;
 }
 
 export interface PomodoroDailyStats {
@@ -87,6 +98,14 @@ export type PomodoroMode = 'work' | 'shortBreak' | 'longBreak';
 
 export type PomodoroHistory = Record<string, PomodoroDailyStats>;
 
+export interface AppNotification {
+  id: string;
+  title: string;
+  message: string;
+  type: 'task' | 'habit' | 'deadline' | 'system';
+  timestamp: number;
+}
+
 export interface AISettings {
   baseUrl: string;
   apiKey: string;
@@ -97,24 +116,4 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: number;
-}
-
-export type FrequencyType = 'daily' | 'smart_workdays' | 'smart_holidays' | 'custom';
-
-export interface Habit {
-  id: string;
-  name: string;
-  frequency: FrequencyType;
-  customDays: number[]; // 0=Sunday, 1=Monday, ..., 6=Saturday
-  reminderTime?: string; // "HH:mm"
-  color: string;
-  completedDates: string[]; // ["2023-01-01", "2023-01-02"]
-  createdAt: string;
-}
-
-export interface Toast {
-  id: string;
-  title: string;
-  message: string;
-  kind: 'habit' | 'task' | 'system';
 }

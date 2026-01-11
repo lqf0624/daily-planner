@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Check, Trash2, Activity, Edit2, Zap } from 'lucide-react';
+import { Plus, Check, Trash2, Activity, Edit2, Zap, Bell, BellOff } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -24,6 +24,7 @@ const HabitTracker = () => {
       color: '#0f766e',
       frequency: 'daily',
       customDays: [1, 2, 3, 4, 5],
+      smartWorkdayOnly: false,
       completedDates: [],
     });
     setIsDialogOpen(true);
@@ -67,22 +68,25 @@ const HabitTracker = () => {
       <div className="flex items-center justify-between no-drag">
         <div className="space-y-1">
           <h3 className="text-xl font-black text-slate-800 tracking-tight text-primary flex items-center gap-2">
-            习惯追踪 <Badge variant="secondary" className="h-5 text-[9px] bg-slate-100 text-slate-500 border-none">{isTodayWorkday ? '今日工作日' : '今日休息'}</Badge>
+            习惯养成 <Badge variant="secondary" className="h-5 text-[9px] bg-slate-100 text-slate-500 border-none">{isTodayWorkday ? '今日工作日' : '今日休息'}</Badge>
           </h3>
-          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Consistency is key to success</p>
+          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Small steps, big results</p>
         </div>
         <Button size="sm" onClick={handleOpenAdd} className="gap-2 rounded-xl shadow-lg shadow-primary/20">
-          <Plus size={16} /> 新建习惯
+          <Plus size={16} /> 开启新习惯
         </Button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 overflow-y-auto pr-2 pb-8 no-drag">
         {habits.map((habit) => {
-          // 判断今天是否需要打卡
-          let shouldCheckIn = true;
-          if (habit.frequency === 'smart_workdays') shouldCheckIn = isTodayWorkday;
-          else if (habit.frequency === 'smart_holidays') shouldCheckIn = !isTodayWorkday;
-          else if (habit.frequency === 'custom') shouldCheckIn = habit.customDays.includes(new Date().getDay());
+          // 判定逻辑：频率基础 + 智能工作日修正
+          let isIncludedDay = true;
+          if (habit.frequency === 'weekly') isIncludedDay = new Date().getDay() === 1; // 简化为周一
+          else if (habit.frequency === 'custom') isIncludedDay = habit.customDays.includes(new Date().getDay());
+          
+          const shouldCheckIn = habit.smartWorkdayOnly 
+            ? (isIncludedDay && isTodayWorkday) 
+            : isIncludedDay;
 
           const isCompletedToday = habit.completedDates.includes(today);
 
@@ -93,7 +97,7 @@ const HabitTracker = () => {
                 "group relative p-6 rounded-[28px] border-2 transition-all duration-300",
                 isCompletedToday 
                   ? "bg-primary/5 border-primary/20" 
-                  : shouldCheckIn ? "bg-white border-slate-200 shadow-sm" : "bg-slate-50/50 border-slate-100 opacity-60"
+                  : shouldCheckIn ? "bg-white border-slate-200 shadow-sm hover:border-primary/20" : "bg-slate-50 border-slate-100 opacity-60"
               )}
             >
               <div className="flex justify-between items-start mb-4">
@@ -110,11 +114,17 @@ const HabitTracker = () => {
               </div>
 
               <div className="space-y-1 mb-6">
-                <h4 className={cn("text-lg font-black tracking-tight", isCompletedToday ? "text-primary" : "text-slate-800")}>
-                  {habit.name}
-                </h4>
-                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">
-                  {habit.frequency === 'smart_workdays' ? '仅工作日 (含调休)' : habit.frequency === 'smart_holidays' ? '仅节假日 (含周末)' : '每日习惯'}
+                <div className="flex items-center gap-2">
+                  <h4 className={cn("text-lg font-black tracking-tight", isCompletedToday ? "text-primary" : "text-slate-800")}>
+                    {habit.name}
+                  </h4>
+                  {habit.reminderTime && <Bell size={12} className="text-slate-300" />}
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {habit.smartWorkdayOnly && <Badge variant="secondary" className="bg-orange-50 text-orange-600 border-orange-100 px-1.5 py-0">智能工作日</Badge>}
+                  <Badge variant="secondary" className="bg-slate-100 text-slate-500 border-none px-1.5 py-0 uppercase">
+                    {habit.frequency === 'daily' ? '每日' : habit.frequency === 'weekly' ? '每周' : '自定义'}
+                  </Badge>
                 </div>
               </div>
 
@@ -125,10 +135,10 @@ const HabitTracker = () => {
                   "w-full h-12 rounded-xl font-black transition-all active:scale-95",
                   isCompletedToday 
                     ? "bg-primary text-white shadow-lg shadow-primary/20" 
-                    : shouldCheckIn ? "bg-white border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-primary shadow-sm" : "bg-transparent border-none text-slate-300"
+                    : shouldCheckIn ? "bg-white border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-primary" : "bg-transparent text-slate-300 border-none"
                 )}
               >
-                {isCompletedToday ? <><Check size={20} className="mr-2" /> 已完成</> : shouldCheckIn ? "点击打卡" : "今日暂无计划"}
+                {isCompletedToday ? <><Check size={20} className="mr-2" /> 目标已达成</> : shouldCheckIn ? "完成打卡" : "今日休息中"}
               </Button>
             </div>
           );
@@ -136,34 +146,45 @@ const HabitTracker = () => {
       </div>
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="sm:max-w-[425px] rounded-[32px] border-slate-200 bg-white shadow-2xl">
-          <DialogHeader><DialogTitle className="text-2xl font-black text-slate-800">{editingHabit?.id ? '修改习惯' : '新习惯'}</DialogTitle></DialogHeader>
+        <DialogContent className="sm:max-w-[425px] rounded-3xl border-slate-200 bg-white shadow-2xl">
+          <DialogHeader><DialogTitle className="text-2xl font-black text-slate-800">习惯设置</DialogTitle></DialogHeader>
           <div className="grid gap-6 py-4">
             <div className="space-y-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">习惯名称</label>
-              <Input value={editingHabit?.name || ''} onChange={e => setEditingHabit(prev => ({ ...prev, name: e.target.value }))} className="h-12 rounded-xl bg-slate-50 border-slate-200 font-bold" placeholder="..." />
+              <Input value={editingHabit?.name || ''} onChange={e => setEditingHabit(prev => ({ ...prev, name: e.target.value }))} className="h-12 rounded-xl bg-slate-50 border-slate-200 font-bold" />
             </div>
             
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">频率逻辑</label>
-                <select 
-                  className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3 text-sm font-bold appearance-none"
-                  value={editingHabit?.frequency}
-                  onChange={e => setEditingHabit(prev => ({ ...prev, frequency: e.target.value as any }))} // eslint-disable-line @typescript-eslint/no-explicit-any
-                >
-                  <option value="daily">每一天</option>
-                  <option value="smart_workdays">智能工作日</option>
-                  <option value="smart_holidays">法定节假日</option>
-                  <option value="custom">星期重复</option>
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">基础频率</label>
+                  <select 
+                    className="w-full h-11 bg-slate-50 border border-white/60 rounded-xl px-3 text-sm font-bold appearance-none"
+                    value={editingHabit?.frequency}
+                    onChange={e => setEditingHabit(prev => ({ ...prev, frequency: e.target.value as 'daily' | 'weekly' | 'custom' }))}
+                  >
+                  <option value="daily">每天</option>
+                  <option value="weekly">每周</option>
+                  <option value="custom">按星期</option>
                 </select>
               </div>
               <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">颜色</label>
-                <div className="flex gap-2 items-center h-11 bg-slate-50 border border-slate-200 rounded-xl px-3">
-                  <input type="color" value={editingHabit?.color || '#0f766e'} onChange={e => setEditingHabit(prev => ({ ...prev, color: e.target.value }))} className="w-full h-6 rounded border-none cursor-pointer bg-transparent" />
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">提醒时间</label>
+                <div className="relative">
+                  <Input type="time" value={editingHabit?.reminderTime || ''} onChange={e => setEditingHabit(prev => ({ ...prev, reminderTime: e.target.value }))} className="h-11 rounded-xl bg-slate-50 border-slate-200 font-bold" />
+                  {!editingHabit?.reminderTime && <BellOff className="absolute right-3 top-3 text-slate-300" size={16} />}
                 </div>
               </div>
+            </div>
+
+            <div className="flex items-center justify-between p-4 bg-primary/5 rounded-2xl border border-primary/10">
+              <div className="flex gap-3 items-start">
+                <Zap size={18} className="text-primary mt-0.5 shrink-0" />
+                <div className="space-y-0.5">
+                  <p className="text-sm font-bold text-slate-700">仅在工作日生效</p>
+                  <p className="text-[10px] text-slate-500">自动过滤节假日，包含调休补班日</p>
+                </div>
+              </div>
+              <input type="checkbox" checked={editingHabit?.smartWorkdayOnly || false} onChange={e => setEditingHabit(prev => ({ ...prev, smartWorkdayOnly: e.target.checked }))} className="w-5 h-5 accent-primary" />
             </div>
 
             {editingHabit?.frequency === 'custom' && (
@@ -176,26 +197,14 @@ const HabitTracker = () => {
                 </div>
               </div>
             )}
-
-            {(editingHabit?.frequency === 'smart_workdays' || editingHabit?.frequency === 'smart_holidays') && (
-              <div className="p-4 bg-primary/5 rounded-2xl border border-primary/10 flex gap-3 items-start animate-in fade-in">
-                <Zap size={16} className="text-primary mt-0.5 shrink-0" />
-                <p className="text-[10px] text-slate-500 font-medium leading-relaxed">
-                  {editingHabit.frequency === 'smart_workdays' 
-                    ? "此模式将自动排除法定节假日，并包含因调休而需要上班的周末。实现真正的“工作日”打卡。"
-                    : "此模式将包含法定节假日以及正常的周末，但在调休补班日会暂停提醒。"}
-                </p>
-              </div>
-            )}
           </div>
-          <DialogFooter><Button onClick={handleSave} className="w-full h-12 rounded-xl font-bold shadow-lg shadow-primary/20">确认</Button></DialogFooter>
+          <DialogFooter><Button onClick={handleSave} className="w-full h-12 rounded-xl font-bold shadow-lg shadow-primary/10">确认保存</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
   );
 };
 
-// 辅助组件
 const Badge = ({ children, variant, className }: { children: React.ReactNode, variant?: string, className?: string }) => (
   <span className={cn("px-2 py-0.5 rounded-full text-[10px] font-black border", variant === 'secondary' ? "bg-slate-100 border-slate-200 text-slate-600" : "bg-primary/10 border-primary/20 text-primary", className)}>{children}</span>
 );

@@ -1,6 +1,6 @@
 {
   "productName": "daily-planner",
-  "version": "0.1.19",
+  "version": "0.2.0",
   "identifier": "com.dailyplanner.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -19,7 +19,9 @@
         "resizable": true,
         "decorations": false,
         "transparent": true,
-        "label": "main"
+        "label": "main",
+        "url": "index.html",
+        "visible": true
       },
       {
         "title": "Floating",
@@ -28,11 +30,11 @@
         "resizable": false,
         "decorations": false,
         "transparent": true,
-        "alwaysOnTop": false,
-        "visible": false,
+        "alwaysOnTop": true,
         "skipTaskbar": true,
         "label": "floating",
-        "url": "/?view=floating"
+        "url": "/?view=floating",
+        "visible": false
       }
     ],
     "security": {
@@ -50,6 +52,9 @@
   "bundle": {
     "active": true,
     "targets": ["nsis", "dmg"],
+    "category": "Productivity",
+    "copyright": "Copyright © 2026 lqf0624",
+    "shortDescription": "A smart daily planner with AI support",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

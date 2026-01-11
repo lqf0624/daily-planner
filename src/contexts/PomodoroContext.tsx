@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useCallback, useContext, useMemo, useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { invoke } from '@tauri-apps/api/core';
@@ -18,6 +19,8 @@ type PomodoroState = {
     auto_start_breaks: boolean;
     auto_start_pomodoros: boolean;
     max_sessions: number;
+    stop_after_sessions: number;
+    stop_after_long_break: boolean;
   };
 };
 
@@ -46,10 +49,8 @@ export const PomodoroProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setState(event.payload);
     });
 
-    // 监听专注完成事件并记录到 Store
     const unlistenCompleted = listen<number>('pomodoro_completed', (event) => {
-      const minutes = event.payload;
-      logPomodoroSession(format(new Date(), 'yyyy-MM-dd'), minutes);
+      logPomodoroSession(format(new Date(), 'yyyy-MM-dd'), event.payload);
     });
 
     return () => {
@@ -63,9 +64,14 @@ export const PomodoroProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const skipMode = useCallback(() => invoke('skip_mode'), []);
 
   const updatePomodoroSettings = useCallback((settings: Partial<PomodoroSettings>) => {
-    const newSettings = { ...localSettings, ...settings };
+    // 1. 获取最新合并后的设置
+    const { pomodoroSettings: currentLocal } = useAppStore.getState();
+    const newSettings = { ...currentLocal, ...settings };
+    
+    // 2. 同步到 Store
     updateStore(settings);
 
+    // 3. 关键：同步到 Rust 后端（必须包含所有 snake_case 字段）
     invoke('update_settings', { settings: {
       work_duration: newSettings.workDuration,
       short_break_duration: newSettings.shortBreakDuration,
@@ -74,8 +80,10 @@ export const PomodoroProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       auto_start_breaks: newSettings.autoStartBreaks,
       auto_start_pomodoros: newSettings.autoStartPomodoros,
       max_sessions: newSettings.maxSessions,
-    }});
-  }, [localSettings, updateStore]);
+      stop_after_sessions: newSettings.stopAfterSessions || 0,
+      stop_after_long_break: newSettings.stopAfterLongBreak || false,
+    }}).catch(console.error);
+  }, [updateStore]);
 
   const value = useMemo(() => {
     const s = state;
@@ -88,7 +96,9 @@ export const PomodoroProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         autoStartBreaks: s.settings.auto_start_breaks,
         autoStartPomodoros: s.settings.auto_start_pomodoros,
         maxSessions: s.settings.max_sessions,
-      } : localSettings,
+        stopAfterSessions: s.settings.stop_after_sessions,
+        stopAfterLongBreak: s.settings.stop_after_long_break,
+      } : { ...localSettings },
       updatePomodoroSettings,
       timeLeft: s?.time_left ?? (localSettings.workDuration * 60),
       isActive: s?.is_active ?? false,
@@ -103,7 +113,6 @@ export const PomodoroProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   return <PomodoroContext.Provider value={value}>{children}</PomodoroContext.Provider>;
 };
 
-// eslint-disable-next-line react-refresh/only-export-components
 export const usePomodoro = () => {
   const context = useContext(PomodoroContext);
   if (!context) throw new Error('usePomodoro must be used within PomodoroProvider');

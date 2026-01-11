@@ -53,17 +53,21 @@ npm run build:mac
 推送带 `v*` 标签（例如 `v0.1.0`），或在 Actions 手动触发 `build-desktop`，
 即可在 CI 中生成 Windows/Mac 安装包并下载。
 
-## macOS 安装提示
+## 安装说明
 
-如果 macOS 弹出“应用已损坏，无法打开”，通常是因为应用未签名/未公证被 Gatekeeper 拦截。
-没有 Apple 开发者账号时，可先用以下方式打开：
+### Windows
+下载 `.exe` 安装包直接运行即可。
 
-```bash
-xattr -cr /Applications/daily\ planner.app
-```
+### macOS
+由于应用尚未在 Apple 开发者中心注册签名，安装后请执行以下操作：
+1. **解除系统隔离**：若无法直接打开，请打开“终端”应用，输入以下命令并回车：
+   ```bash
+   sudo xattr -rd com.apple.quarantine /Applications/daily-planner.app
+   ```
+2. **右键打开**：首次运行建议在访达中“右键 -> 打开”，在弹出的提示中再次点击“打开”。
 
-或在 Finder 中右键应用 → “打开”。  
-若需对外分发，建议配置签名与公证（Developer ID + Notarization）。
+## 核心功能
+
 
 ## 项目结构
 

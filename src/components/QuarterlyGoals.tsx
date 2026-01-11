@@ -1,156 +1,148 @@
 import React, { useState } from 'react';
-import { Target, Plus, CheckCircle2, Circle, Trash2, X, ChevronLeft, ChevronRight, Lock } from 'lucide-react';
+import { Plus, Target, CheckCircle2, Circle, Trash2, Edit2, TrendingUp } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
 import { cn } from '../utils/cn';
+import { QuarterlyGoal } from '../types';
 
 const QuarterlyGoals: React.FC = () => {
   const { goals, addGoal, updateGoal, deleteGoal } = useAppStore();
-  const [viewDate, setViewDate] = useState(new Date());
-  const [isAdding, setIsAdding] = useState(false);
-  const [newGoalTitle, setNewGoalTitle] = useState('');
   
-  const currentQuarter = Math.floor((viewDate.getMonth() + 3) / 3);
-  const currentYear = viewDate.getFullYear();
+  const now = new Date();
+  const realYear = now.getFullYear();
+  const realQuarter = Math.floor(now.getMonth() / 3) + 1;
 
-  const realToday = new Date();
-  const realQuarter = Math.floor((realToday.getMonth() + 3) / 3);
-  const realYear = realToday.getFullYear();
+  const [selectedYear, setSelectedYear] = useState(realYear);
+  const [selectedQuarter, setSelectedQuarter] = useState(realQuarter);
 
-  const isFutureQuarter = currentYear > realYear || (currentYear === realYear && currentQuarter > realQuarter);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editingGoal, setEditingGoal] = useState<Partial<QuarterlyGoal> | null>(null);
 
-  const filteredGoals = goals.filter(g => g.quarter === currentQuarter && g.year === currentYear);
-
-  const handlePrev = () => {
-    const d = new Date(viewDate);
-    d.setMonth(d.getMonth() - 3);
-    setViewDate(d);
+  const handleOpenAdd = () => {
+    setEditingGoal({ id: '', title: '', year: selectedYear, quarter: selectedQuarter, progress: 0, isCompleted: false });
+    setIsDialogOpen(true);
   };
 
-  const handleNext = () => {
-    if (isFutureQuarter) return;
-    const d = new Date(viewDate);
-    d.setMonth(d.getMonth() + 3);
-    setViewDate(d);
+  const handleOpenEdit = (goal: QuarterlyGoal) => {
+    setEditingGoal(goal);
+    setIsDialogOpen(true);
   };
 
-  const handleAddGoal = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newGoalTitle.trim() || isFutureQuarter) return;
+  const handleSave = () => {
+    if (!editingGoal?.title) return;
+    if (editingGoal.id) updateGoal(editingGoal.id, editingGoal);
+    else addGoal({ ...editingGoal, id: crypto.randomUUID() } as QuarterlyGoal);
+    setIsDialogOpen(false);
+  };
 
-    addGoal({
-      id: crypto.randomUUID(),
-      title: newGoalTitle,
-      quarter: currentQuarter,
-      year: currentYear,
-      progress: 0,
-      isCompleted: false,
-    });
-    setNewGoalTitle('');
-    setIsAdding(false);
+  const filteredGoals = goals.filter(g => g.year === selectedYear && g.quarter === selectedQuarter);
+
+  const isFuture = (y: number, q: number) => {
+    if (y > realYear) return true;
+    if (y === realYear && q > realQuarter) return true;
+    return false;
   };
 
   return (
-    <div className="w-full space-y-8">
-      <div className="flex items-center justify-between bg-white/80 p-6 rounded-2xl border border-white/60 shadow-[var(--shadow-soft)]">
-        <button onClick={handlePrev} className="p-3 hover:bg-slate-100 rounded-lg transition-colors"><ChevronLeft size={28}/></button>
-        <div className="text-center">
-          <h3 className="text-3xl font-bold text-slate-800">{currentYear}年 第{currentQuarter}季度</h3>
-          <p className="text-lg text-slate-500 font-medium mt-1">核心目标规划</p>
+    <div className="h-full flex flex-col space-y-6 animate-in fade-in duration-500">
+      <div className="flex items-center justify-between no-drag px-1">
+        <div className="space-y-1">
+          <h3 className="text-xl font-black text-slate-800 tracking-tight flex items-center gap-2"><Target className="text-primary" size={24} /> 季度回顾</h3>
+          <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl border border-slate-200">
+            <select value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="bg-transparent text-[10px] font-black uppercase px-2 outline-none">
+              {[2024, 2025, 2026].filter(y => y <= realYear).map(y => <option key={y} value={y}>{y}年</option>)}
+            </select>
+            <div className="w-px h-3 bg-slate-300" />
+            <div className="flex gap-1">
+              {[1, 2, 3, 4].map(q => (
+                <button 
+                  key={q} 
+                  disabled={isFuture(selectedYear, q)}
+                  onClick={() => setSelectedQuarter(q)}
+                  className={cn("px-3 py-1 text-[10px] font-black rounded-lg transition-all", selectedQuarter === q ? "bg-white text-primary shadow-sm" : "text-slate-400 hover:text-slate-600 disabled:opacity-20")}
+                >Q{q}</button>
+              ))}
+            </div>
+          </div>
         </div>
-        <button 
-          onClick={handleNext} 
-          disabled={isFutureQuarter}
-          className={cn("p-3 rounded-lg transition-colors", isFutureQuarter ? "text-slate-200 cursor-not-allowed" : "hover:bg-slate-100")}
-        >
-          <ChevronRight size={28}/>
-        </button>
+        <Button size="sm" onClick={handleOpenAdd} className="gap-2 rounded-xl shadow-lg shadow-primary/10"><Plus size={16} /> 设定新目标</Button>
       </div>
 
-      <div className="relative min-h-[500px]">
-        {isFutureQuarter && (
-          <div className="absolute inset-0 z-10 bg-white/70 backdrop-blur-[2px] rounded-3xl flex flex-col items-center justify-center text-slate-400">
-            <Lock size={64} className="mb-4 opacity-20" />
-            <p className="text-2xl font-bold">该季度尚未开始</p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 overflow-y-auto pr-2 pb-8 no-drag">
+        {filteredGoals.length === 0 ? (
+          <div className="col-span-full py-20 border-2 border-dashed border-slate-100 rounded-[32px] flex flex-col items-center justify-center text-slate-300">
+            <TrendingUp size={48} className="mb-4 opacity-20" /><p className="font-bold uppercase tracking-widest text-xs">暂无目标记录</p>
           </div>
-        )}
-
-        {!isAdding && !isFutureQuarter && (
-          <button 
-            onClick={() => setIsAdding(true)}
-            className="w-full py-8 border-2 border-dashed border-slate-200 rounded-2xl text-slate-400 hover:border-primary hover:text-primary transition-all flex items-center justify-center gap-3 mb-8 text-xl font-medium"
-          >
-            <Plus size={28} /> 添加季度目标
-          </button>
-        )}
-
-        {isAdding && (
-          <form onSubmit={handleAddGoal} className="bg-white/70 p-8 rounded-2xl border-2 border-primary/20 animate-in zoom-in-95 mb-8 max-w-4xl mx-auto shadow-[var(--shadow-soft)]">
-            <div className="flex justify-between items-center mb-6">
-              <h4 className="font-bold text-2xl text-slate-800">新增季度核心目标</h4>
-              <button type="button" onClick={() => setIsAdding(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><X size={24}/></button>
-            </div>
-            <input autoFocus type="text" value={newGoalTitle} onChange={e => setNewGoalTitle(e.target.value)} placeholder="描述你的目标..." className="w-full p-4 bg-white border border-slate-200 rounded-xl outline-none mb-6 text-xl focus:ring-2 focus:ring-primary shadow-inner" />
-            <div className="flex justify-end gap-4">
-              <button type="button" onClick={() => setIsAdding(false)} className="px-6 py-2 text-lg text-slate-500 hover:text-slate-700">取消</button>
-              <button type="submit" className="px-10 py-3 bg-primary text-white rounded-xl font-bold text-lg hover:bg-primary-dark shadow-md">确认添加</button>
-            </div>
-          </form>
-        )}
-
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          {filteredGoals.length === 0 ? (
-            <div className="col-span-full text-center py-32 text-slate-300 border-2 border-dashed rounded-3xl bg-white/50">
-              <Target className="mx-auto mb-4 opacity-20" size={100} />
-              <p className="text-2xl font-medium">本季度暂未设定核心目标</p>
-            </div>
-          ) : (
-            filteredGoals.map((goal) => (
-              <div key={goal.id} className="bg-white/80 p-8 rounded-3xl border border-white/60 shadow-[var(--shadow-soft)] hover:shadow-xl transition-all group flex flex-col justify-between">
-                <div>
-                  <div className="flex justify-between items-start mb-6">
-                    <h4 className={cn("font-bold text-2xl flex-1 leading-snug", goal.isCompleted && "line-through text-slate-400")}>{goal.title}</h4>
-                    <div className="flex gap-3 ml-4 shrink-0">
-                      <button onClick={() => updateGoal(goal.id, { isCompleted: !goal.isCompleted })} className="transition-transform hover:scale-110">
-                        {goal.isCompleted ? <CheckCircle2 className="text-secondary" size={36}/> : <Circle className="text-slate-300" size={36}/>}
-                      </button>
-                      {!isFutureQuarter && (
-                        <button onClick={() => deleteGoal(goal.id)} className="opacity-0 group-hover:opacity-100 p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all">
-                          <Trash2 size={24}/>
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="space-y-4">
-                  <div className="flex justify-between text-lg font-bold">
-                    <span className="text-slate-500 uppercase tracking-wider text-sm">完成进度</span>
-                    <span className="text-primary">{goal.progress}%</span>
-                  </div>
-                  <div className="w-full bg-slate-100 h-4 rounded-full overflow-hidden shadow-inner">
-                    <div 
-                      className="bg-primary h-full transition-all duration-700 ease-out relative" 
-                      style={{ width: `${goal.progress}%` }} 
-                    >
-                      <div className="absolute inset-0 bg-gradient-to-r from-transparent to-white/20 animate-pulse" />
-                    </div>
-                  </div>
-                  {!isFutureQuarter && (
-                    <input 
-                      type="range" 
-                      min="0" 
-                      max="100" 
-                      value={goal.progress} 
-                      onChange={e => updateGoal(goal.id, { progress: parseInt(e.target.value) })} 
-                      className="w-full accent-primary h-2 mt-4 cursor-pointer" 
-                    />
-                  )}
+        ) : (
+          filteredGoals.map((goal) => (
+            <div key={goal.id} className={cn("group relative p-6 rounded-[32px] border-2 transition-all duration-300", goal.isCompleted ? "bg-primary/5 border-primary/20 shadow-inner" : "bg-white border-slate-200 hover:border-primary/20 shadow-sm")}>
+              <div className="flex justify-between items-start mb-4">
+                <div className={cn("p-3 rounded-2xl", goal.isCompleted ? "bg-white text-primary shadow-sm" : "bg-slate-50 text-slate-400")}><Target size={24} /></div>
+                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" onClick={() => handleOpenEdit(goal)}><Edit2 size={14} /></Button>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-red-400" onClick={() => deleteGoal(goal.id)}><Trash2 size={14} /></Button>
                 </div>
               </div>
-            ))
-          )}
-        </div>
+
+              <div className="space-y-4 mb-6">
+                <h4 className={cn("text-lg font-black tracking-tight", goal.isCompleted ? "text-primary" : "text-slate-800")}>{goal.title}</h4>
+                
+                {/* 核心修复：即时可拖动的进度条 */}
+                <div className="space-y-3">
+                  <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-slate-400">
+                    <span>进度推进</span>
+                    <span className={cn(goal.isCompleted && "text-primary")}>{goal.progress}%</span>
+                  </div>
+                  <div className="relative group/slider pt-1">
+                    <input 
+                      type="range" 
+                      min="0" max="100" 
+                      value={goal.progress} 
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        updateGoal(goal.id, { progress: val, isCompleted: val === 100 });
+                      }}
+                      className="w-full h-1.5 bg-slate-100 rounded-full appearance-none cursor-pointer accent-primary group-hover/slider:h-2 transition-all"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <Button 
+                onClick={() => updateGoal(goal.id, { isCompleted: !goal.isCompleted, progress: !goal.isCompleted ? 100 : goal.progress })}
+                className={cn(
+                  "w-full h-12 rounded-xl font-black transition-all active:scale-95",
+                  goal.isCompleted 
+                    ? "bg-primary text-white shadow-lg shadow-primary/20" 
+                    : "bg-slate-50 text-slate-500 hover:bg-white border border-transparent hover:border-primary/20"
+                )}
+              >
+                {goal.isCompleted ? <><CheckCircle2 size={20} className="mr-2" /> 目标已达成</> : <><Circle size={20} className="mr-2" /> 标记完成</>}
+              </Button>
+            </div>
+          ))
+        )}
       </div>
+
+      {/* 编辑弹窗保持精简 */}
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent className="sm:max-w-[425px] rounded-[32px] border-slate-200 bg-white shadow-2xl">
+          <DialogHeader><DialogTitle className="text-2xl font-black text-slate-800 tracking-tighter">目标设置</DialogTitle></DialogHeader>
+          <div className="grid gap-6 py-4">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">标题</label>
+              <Input value={editingGoal?.title || ''} onChange={e => setEditingGoal(prev => ({ ...prev, title: e.target.value }))} className="h-12 rounded-xl bg-slate-50 border-slate-200 font-bold" />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2"><label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">年份</label><Input type="number" value={editingGoal?.year} onChange={e => setEditingGoal(prev => ({ ...prev, year: Number(e.target.value) }))} className="h-11 rounded-xl bg-slate-50" /></div>
+              <div className="space-y-2"><label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">季度</label><select className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3 text-sm font-bold" value={editingGoal?.quarter} onChange={e => setEditingGoal(prev => ({ ...prev, quarter: Number(e.target.value) }))}>{[1, 2, 3, 4].map(q => <option key={q} value={q}>Q{q}</option>)}</select></div>
+            </div>
+          </div>
+          <DialogFooter><Button onClick={handleSave} className="w-full h-12 rounded-xl font-bold shadow-lg shadow-primary/20">确定保存</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

@@ -23,3 +23,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     </PomodoroProvider>
   </React.StrictMode>,
 )
+
+// 全局禁用默认右键菜单
+document.addEventListener('contextmenu', (e) => e.preventDefault());
+

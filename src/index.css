@@ -1,5 +1,4 @@
 @import "tailwindcss";
-/* 引入 HarmonyOS Sans SC 字体 */
 @import url('https://cdn.jsdelivr.net/npm/harmonyos-sans-sc@latest/index.css');
 @import url('https://fonts.googleapis.com/css2?family=ZCOOL+XiaoWei&display=swap');
 
@@ -10,11 +9,8 @@
   --color-secondary-dark: #ea580c;
   --color-background: #ffffff;
   --color-ink: #0f172a;
-  
-  /* 定义字体家族 */
   --font-sans: "HarmonyOS Sans SC", "Inter", "system-ui", sans-serif;
   --font-serif: "ZCOOL XiaoWei", "Noto Serif SC", serif;
-
   --shadow-soft: 0 24px 60px -40px rgba(15, 23, 42, 0.4);
   --radius-lg: 0.75rem;
   --color-border: #e2e8f0;
@@ -28,13 +24,22 @@
   html, body {
     -webkit-user-select: none;
     user-select: none;
-    background: transparent;
+    /* 核心修复：除非显式指定，否则保持完全透明 */
+    background: transparent !important;
+    margin: 0;
+    padding: 0;
     color: var(--color-ink);
     overflow: hidden;
-    /* 默认使用 HarmonyOS Sans Regular */
     font-family: var(--font-sans);
     font-weight: 400;
     -webkit-font-smoothing: antialiased;
+  }
+
+  /* 移除 root 的默认背景 */
+  #root {
+    background: transparent !important;
+    height: 100vh;
+    width: 100vw;
   }
 
   input, textarea, [contenteditable="true"] {
@@ -43,22 +48,16 @@
     font-family: var(--font-sans);
   }
 
-  /* 统一标题权重 */
   h1, h2, h3, h4, h5, h6 {
     font-family: var(--font-sans);
-    font-weight: 700; /* Bold */
+    font-weight: 700;
     letter-spacing: -0.02em;
-  }
-
-  * {
-    border-color: var(--color-border);
   }
 }
 
 .drag-region { -webkit-app-region: drag; }
 .no-drag { -webkit-app-region: no-drag; }
 
-/* 滚动条美化 */
 ::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
