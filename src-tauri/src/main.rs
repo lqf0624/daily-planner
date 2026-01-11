@@ -181,13 +181,8 @@ fn main() {
       let icon_rest_path = resource_path.join("public/tray-rest-mac.png");
 
       // 仅加载，若失败则为 None，不引用带有生命周期的 app 对象
-      let mut icon_work = Image::from_path(icon_work_path).ok();
-      let mut icon_rest = Image::from_path(icon_rest_path).ok();
-
-      #[cfg(target_os = "macos")] {
-        if let Some(i) = icon_work.as_mut() { i.set_is_template(true); }
-        if let Some(i) = icon_rest.as_mut() { i.set_is_template(true); }
-      }
+      let icon_work = Image::from_path(icon_work_path).ok();
+      let icon_rest = Image::from_path(icon_rest_path).ok();
 
       let config_path = get_config_path(&handle).join("pomodoro_settings.json");
       let state_path = get_config_path(&handle).join("pomodoro_state.json");
