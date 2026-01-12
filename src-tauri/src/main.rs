@@ -177,7 +177,6 @@ async fn toggle_floating_window(handle: tauri::AppHandle) {
     .inner_size(220.0, 220.0)
     .resizable(false)
     .decorations(false)
-    .transparent(true)
     .always_on_top(true)
     .skip_taskbar(true)
     .build();
