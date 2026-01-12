@@ -8,7 +8,11 @@ on:
 jobs:
   publish:
     permissions:
-      contents: write
+      contents: write    # 允许读写代码和 Release
+      packages: write    # 允许上传包（虽然这里主要是 Release asset，但有时会有交叉）
+      actions: read      # 允许读取 Action 状态
+      id-token: write    # 如果需要身份验证
+
     strategy:
       fail-fast: false
       matrix:
@@ -32,7 +36,6 @@ jobs:
       - name: install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          # 根据当前 job 的 args 动态决定安装哪个 target
           targets: ${{ matrix.platform == 'macos-latest' && (contains(matrix.args, 'aarch64') && 'aarch64-apple-darwin' || 'x86_64-apple-darwin') || '' }}
 
       - name: install dependencies (ubuntu only)
