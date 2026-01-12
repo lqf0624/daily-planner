@@ -78,15 +78,31 @@ function App() {
       const todayStr = format(now, 'yyyy-MM-dd');
       const timeStr = format(now, 'HH:mm');
       
-      const active = tasks.find(t => {
-        if (t.isCompleted) return false;
-        try {
-          if (t.isMultiDay && t.endDate) return todayStr >= t.date && todayStr <= t.endDate;
-          if (t.date !== todayStr) return false;
-          if (!t.hasTime || !t.startTime || !t.endTime) return true;
-          return isWithinInterval(now, { start: parseTaskTime(t.date, t.startTime), end: parseTaskTime(t.date, t.endTime) });
-        } catch (e) { return false; }
-      });
+      const active = tasks
+        .filter(t => {
+          if (t.isCompleted) return false;
+          try {
+            // 必须涵盖今天
+            if (t.isMultiDay && t.endDate) return todayStr >= t.date && todayStr <= t.endDate;
+            return t.date === todayStr;
+          } catch { return false; }
+        })
+        .sort((a, b) => {
+          // 优先级 0: 当前具体时段
+          const isNowA = a.hasTime && a.startTime && a.endTime && isWithinInterval(now, { start: parseTaskTime(a.date, a.startTime), end: parseTaskTime(a.date, a.endTime) });
+          const isNowB = b.hasTime && b.startTime && b.endTime && isWithinInterval(now, { start: parseTaskTime(b.date, b.startTime), end: parseTaskTime(b.date, b.endTime) });
+          if (isNowA && !isNowB) return -1;
+          if (!isNowA && isNowB) return 1;
+
+          // 优先级 1: 今日全天 (非跨天)
+          const isTodayA = !a.isMultiDay && !a.hasTime;
+          const isTodayB = !b.isMultiDay && !b.hasTime;
+          if (isTodayA && !isTodayB) return -1;
+          if (!isTodayA && isTodayB) return 1;
+
+          return 0;
+        })[0];
+      
       setActiveTask(active ? { title: active.title, id: active.id } : null);
 
       const curWeek = getISOWeek(now);

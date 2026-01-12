@@ -163,6 +163,27 @@ fn show_notification(title: String, body: String, handle: AppHandle) {
   let _ = handle.notification().builder().title(title).body(body).show();
 }
 
+#[tauri::command]
+async fn toggle_floating_window(handle: tauri::AppHandle) {
+  if let Some(window) = handle.get_webview_window("floating") {
+    let _ = window.close();
+  } else {
+    let _ = tauri::WebviewWindowBuilder::new(
+      &handle,
+      "floating",
+      tauri::WebviewUrl::App("/?view=floating".into())
+    )
+    .title("Floating")
+    .inner_size(220.0, 220.0)
+    .resizable(false)
+    .decorations(false)
+    .transparent(true)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .build();
+  }
+}
+
 fn main() {
   tauri::Builder::default()
     .plugin(tauri_plugin_shell::init())
@@ -265,7 +286,7 @@ fn main() {
       });
       Ok(())
     })
-    .invoke_handler(tauri::generate_handler![get_pomodoro_state, toggle_timer, reset_timer, skip_mode, update_settings, open_main, show_notification])
+    .invoke_handler(tauri::generate_handler![get_pomodoro_state, toggle_timer, reset_timer, skip_mode, update_settings, open_main, show_notification, toggle_floating_window])
     .run(tauri::generate_context!())
     .expect("error");
 }

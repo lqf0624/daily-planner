@@ -8,10 +8,10 @@ on:
 jobs:
   publish:
     permissions:
-      contents: write    # 允许读写代码和 Release
-      packages: write    # 允许上传包（虽然这里主要是 Release asset，但有时会有交叉）
-      actions: read      # 允许读取 Action 状态
-      id-token: write    # 如果需要身份验证
+      contents: write
+      packages: write
+      actions: read
+      id-token: write
 
     strategy:
       fail-fast: false
@@ -63,3 +63,5 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+          includeRelease: true
+          updaterJson: true
