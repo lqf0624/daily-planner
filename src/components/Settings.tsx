@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Database, Settings as SettingsIcon, RefreshCw, Download, Upload, Info, Loader2,
-  CheckCircle2
+  CheckCircle2, AlertTriangle
 } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
 import { Button } from './ui/button';
@@ -12,6 +12,7 @@ import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { save, open } from '@tauri-apps/plugin-dialog';
 import { writeTextFile, readTextFile } from '@tauri-apps/plugin-fs';
+import { getVersion } from '@tauri-apps/api/app';
 
 interface SettingsProps {
   isOpen: boolean;
@@ -20,13 +21,19 @@ interface SettingsProps {
 
 const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
   const { aiSettings, updateAISettings, importData } = useAppStore();
+  const [appVersion, setAppVersion] = useState('Loading...');
   
   const [isChecking, setIsChecking] = useState(false);
-  const [updateStatus, setUpdateStatus] = useState<'idle' | 'available' | 'downloading' | 'ready'>('idle');
+  const [updateStatus, setUpdateStatus] = useState<'idle' | 'available' | 'downloading' | 'ready' | 'error' | 'uptodate'>('idle');
+  const [errorMessage, setErrorMessage] = useState('');
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloadSpeed, setDownloadSpeed] = useState('0 KB/s');
   const [newVersion, setNewVersion] = useState('');
   const [updateObj, setUpdateObj] = useState<any>(null); // eslint-disable-line @typescript-eslint/no-explicit-any
+
+  useEffect(() => {
+    getVersion().then(v => setAppVersion(v));
+  }, []);
 
   const handleExport = async () => {
     try {
@@ -67,17 +74,24 @@ const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
   const handleCheckUpdate = async () => {
     if (isChecking) return;
     setIsChecking(true);
+    setUpdateStatus('idle');
+    setErrorMessage('');
+    
+    console.log("Starting update check...");
     try {
       const update = await check();
+      console.log("Update check result:", update);
       if (update?.available) {
         setNewVersion(update.version);
         setUpdateObj(update);
         setUpdateStatus('available');
       } else {
-        alert('当前已是最新版本');
+        setUpdateStatus('uptodate');
       }
-    } catch (e) {
-      alert('无法获取更新信息。');
+    } catch (e: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
+      console.error("Update check failed:", e);
+      setUpdateStatus('error');
+      setErrorMessage(e.message || '网络连接失败或配置错误');
     } finally {
       setIsChecking(false);
     }
@@ -104,8 +118,9 @@ const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
         } else if (event.event === 'Finished') setUpdateStatus('ready');
       });
     } catch (e) {
-      setUpdateStatus('idle');
-      alert('下载失败');
+      console.error(e);
+      setUpdateStatus('error');
+      setErrorMessage('下载过程中断');
     }
   };
 
@@ -168,26 +183,39 @@ const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
                   <div className="w-12 h-12 bg-white rounded-xl border border-slate-200 flex items-center justify-center shadow-sm"><Info size={24} className="text-primary" /></div>
                   <div>
                     <h4 className="font-black text-slate-800">Daily Planner AI</h4>
-                    <p className="text-xs text-slate-400 font-bold">Version 0.1.18</p>
+                    <p className="text-xs text-slate-400 font-bold">Version {appVersion}</p>
                   </div>
                 </div>
 
-                {updateStatus === 'idle' && (
-                  <Button onClick={handleCheckUpdate} disabled={isChecking} className="w-full h-12 rounded-xl font-bold gap-2">
+                <div className="space-y-2">
+                  <Button onClick={handleCheckUpdate} disabled={isChecking || updateStatus === 'downloading'} className="w-full h-12 rounded-xl font-bold gap-2 shadow-lg shadow-primary/10">
                     {isChecking ? <Loader2 className="animate-spin" size={18} /> : <RefreshCw size={18} />}
                     {isChecking ? '正在检查...' : '检查更新'}
                   </Button>
-                )}
+
+                  {/* 状态反馈区域 */}
+                  {updateStatus === 'uptodate' && (
+                    <div className="flex items-center justify-center gap-2 p-3 bg-green-50 rounded-xl text-green-700 text-xs font-bold animate-in fade-in">
+                      <CheckCircle2 size={14} /> 当前已是最新版本
+                    </div>
+                  )}
+
+                  {updateStatus === 'error' && (
+                    <div className="flex items-center justify-center gap-2 p-3 bg-red-50 rounded-xl text-red-600 text-xs font-bold animate-in fade-in">
+                      <AlertTriangle size={14} /> {errorMessage}
+                    </div>
+                  )}
+                </div>
 
                 {updateStatus === 'available' && (
-                  <div className="p-4 bg-primary/5 border border-primary/20 rounded-2xl space-y-4">
+                  <div className="p-4 bg-primary/5 border border-primary/20 rounded-2xl space-y-4 animate-in slide-in-from-top-2">
                     <span className="text-sm font-black text-primary">发现新版本: {newVersion}</span>
                     <Button onClick={startDownload} className="w-full h-10 rounded-xl font-bold">立即下载并更新</Button>
                   </div>
                 )}
 
                 {updateStatus === 'downloading' && (
-                  <div className="space-y-3 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                  <div className="space-y-3 p-4 bg-slate-50 rounded-2xl border border-slate-100 animate-in fade-in">
                     <div className="flex justify-between items-end">
                       <span className="text-xs font-black text-slate-500">正在下载...</span>
                       <span className="text-xs font-bold text-primary">{downloadSpeed}</span>
@@ -200,7 +228,7 @@ const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
                 )}
 
                 {updateStatus === 'ready' && (
-                  <div className="p-4 bg-green-50 border border-green-200 rounded-2xl text-center space-y-3">
+                  <div className="p-4 bg-green-50 border border-green-200 rounded-2xl text-center space-y-3 animate-in zoom-in-95">
                     <CheckCircle2 size={32} className="mx-auto text-green-500" />
                     <p className="text-xs text-green-600 font-medium">下载完成，请重启安装。</p>
                     <Button onClick={() => relaunch()} className="w-full h-10 bg-green-500 hover:bg-green-600 rounded-xl font-bold text-white">立即重启</Button>

@@ -12,7 +12,7 @@ import { Input } from './ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
 import { 
   Plus, Trash2, Settings2, 
-  Repeat, AlertCircle, Edit3, CheckCircle2, Clock
+  Repeat, AlertCircle, Edit3, CheckCircle2, Clock, Tag
 } from 'lucide-react';
 import { cn } from '../utils/cn';
 import './CalendarView.css';
@@ -48,6 +48,7 @@ const CalendarView: React.FC = () => {
       const group = groups.find(g => g.id === task.groupId);
       let endVal = undefined;
       if (task.isMultiDay && task.endDate) {
+        // FullCalendar 的 end 是排他的（不包含），跨天任务需要加 1 天
         endVal = format(addDays(parseISO(task.endDate), 1), 'yyyy-MM-dd');
       } else if (task.hasTime && task.endTime) {
         endVal = task.endTime;
@@ -111,6 +112,29 @@ const CalendarView: React.FC = () => {
     setIsDeadlineDialogOpen(false);
   };
 
+  const handleDateClick = (arg: { dateStr: string; allDay: boolean }) => {
+    let startTime: string | undefined;
+    let endTime: string | undefined;
+    
+    if (!arg.allDay && arg.dateStr.includes('T')) {
+      startTime = arg.dateStr;
+      const d = parseISO(arg.dateStr);
+      d.setHours(d.getHours() + 1);
+      endTime = d.toISOString();
+    }
+
+    setEditingTask({
+      title: '',
+      date: arg.dateStr.split('T')[0],
+      groupId: groups[0]?.id || 'work',
+      hasTime: !arg.allDay,
+      isCompleted: false,
+      startTime: startTime,
+      endTime: endTime
+    });
+    setIsTaskDialogOpen(true);
+  };
+
   return (
     <div className="h-[calc(100vh-180px)] flex flex-col space-y-6 animate-in fade-in duration-500 relative">
       <div className="flex items-center justify-between no-drag">
@@ -145,6 +169,7 @@ const CalendarView: React.FC = () => {
           selectable={true}
           locale="zh-cn"
           height="100%"
+          dateClick={handleDateClick}
           eventClick={(info) => { setEditingTask(info.event.extendedProps as Task); setIsTaskDialogOpen(true); }}
           eventDidMount={(info) => {
             info.el.addEventListener('contextmenu', (e) => {
@@ -206,14 +231,60 @@ const CalendarView: React.FC = () => {
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">任务名称</label>
               <Input className="bg-slate-50 border-slate-200 rounded-xl h-12 text-lg font-bold" value={editingTask?.title || ''} onChange={e => setEditingTask(prev => ({ ...prev, title: e.target.value }))} />
             </div>
+            
             <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
               <div className="flex gap-3 items-center"><CheckCircle2 size={20} className={cn(editingTask?.isCompleted ? "text-green-500" : "text-slate-300")} /><span className="text-sm font-black text-slate-700">标记为已完成</span></div>
               <input type="checkbox" checked={editingTask?.isCompleted || false} onChange={e => setEditingTask(prev => ({ ...prev, isCompleted: e.target.checked }))} className="w-5 h-5 accent-green-500" />
             </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase px-1">开始日期</label><Input type="date" className="rounded-xl bg-slate-50 h-10 font-bold" value={editingTask?.date || ''} onChange={e => setEditingTask(prev => ({ ...prev, date: e.target.value }))} /></div>
-              <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase px-1">跨天至</label><Input type="date" className="rounded-xl bg-slate-50 h-10 font-bold" value={editingTask?.endDate || ''} min={editingTask?.date} onChange={e => setEditingTask(prev => ({ ...prev, endDate: e.target.value, isMultiDay: !!e.target.value }))} /></div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase px-1">任务分类</label>
+                <div className="relative">
+                  <select 
+                    className="w-full h-10 bg-slate-50 border border-slate-200 rounded-xl px-3 text-sm font-bold appearance-none" 
+                    value={editingTask?.groupId || ''} 
+                    onChange={e => setEditingTask(prev => ({ ...prev, groupId: e.target.value }))}
+                  >
+                    {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                  </select>
+                  <Tag className="absolute right-3 top-3 text-slate-400 pointer-events-none" size={14} />
+                </div>
+              </div>
             </div>
+
+            {/* 跨天任务设置 */}
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">这是一个跨天任务？</span>
+                <input 
+                  type="checkbox" 
+                  checked={editingTask?.isMultiDay || false} 
+                  onChange={e => setEditingTask(prev => ({ 
+                    ...prev, 
+                    isMultiDay: e.target.checked,
+                    // 如果取消跨天，清除 endDate
+                    endDate: e.target.checked ? prev?.endDate : undefined 
+                  }))} 
+                  className="w-4 h-4 accent-primary" 
+                />
+              </div>
+              {editingTask?.isMultiDay && (
+                <div className="space-y-2 pt-2 border-t border-slate-200">
+                  <label className="text-[10px] font-black text-slate-400 uppercase px-1">结束日期</label>
+                  <Input 
+                    type="date" 
+                    className="rounded-xl bg-white h-10 font-bold" 
+                    value={editingTask?.endDate || ''} 
+                    min={editingTask?.date} // 限制不能早于开始日期
+                    onChange={e => setEditingTask(prev => ({ ...prev, endDate: e.target.value }))} 
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* 具体时段设置 */}
             <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-4">
               <div className="flex items-center justify-between"><span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">设定具体时段</span><input type="checkbox" checked={editingTask?.hasTime || false} onChange={e => setEditingTask(prev => ({ ...prev, hasTime: e.target.checked }))} className="w-4 h-4 accent-primary" /></div>
               {editingTask?.hasTime && (
@@ -223,6 +294,8 @@ const CalendarView: React.FC = () => {
                 </div>
               )}
             </div>
+            
+            {/* 重复周期 */}
             <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2"><Repeat size={16} className="text-primary" /><span className="text-sm font-bold text-slate-700">重复周期</span></div>

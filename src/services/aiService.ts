@@ -25,12 +25,25 @@ const getContextPrompt = (tasks: Task[], habits: Habit[], goals: QuarterlyGoal[]
 - 季度目标: ${activeGoals.map(g => g.title).join(', ') || '无'}
 - 习惯追踪: ${habits.map(h => h.name).join(', ') || '无'}
 
-请基于以上背景回答用户的问题，提供建议或帮助管理任务。回答要简洁、专业且富有鼓励性。
+请基于以上背景回答用户的问题。
+如果用户明确要求“创建任务”、“添加日程”或“安排日程”，请务必只返回以下 JSON 格式的数据（不要包含任何其他文字或 Markdown 标记）：
+{
+  "action": "create_task",
+  "data": {
+    "title": "任务名称",
+    "date": "YYYY-MM-DD",
+    "startTime": "HH:mm",
+    "endTime": "HH:mm",
+    "description": "备注信息"
+  },
+  "responseToUser": "已为您创建任务：任务名称"
+}
+如果不是创建任务，请正常回答。回答要简洁、专业且富有鼓励性。
 `;
 };
 
 export const sendMessageToAI = async (message: string, history: ChatMessage[]) => {
-  const { aiSettings, tasks, habits, goals, addChatMessage } = useAppStore.getState();
+  const { aiSettings, tasks, habits, goals } = useAppStore.getState();
 
   if (!aiSettings.apiKey) {
     throw new Error('请先在设置中配置 API Key');
@@ -61,12 +74,6 @@ export const sendMessageToAI = async (message: string, history: ChatMessage[]) =
     });
 
     const aiContent = response.data.choices[0].message.content;
-    const newMessage: ChatMessage = {
-      role: 'assistant',
-      content: aiContent,
-      timestamp: Date.now()
-    };
-    addChatMessage(newMessage);
     return aiContent;
   } catch (error: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
     console.error('AI Service Error:', error);

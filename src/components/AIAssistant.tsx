@@ -32,46 +32,49 @@ const AIAssistant: React.FC = () => {
     setIsLoading(true);
 
     try {
-      // 修正：调用新的 sendMessageToAI 函数，其内部会自动从 Store 获取上下文
       const response = await sendMessageToAI(userMsg, chatHistory);
+      let processedContent = response;
 
+      // 尝试解析 JSON 动作
       try {
-        const cleanResponse = response.replace(/^```json\s*/, '').replace(/\s*```$/, '');
-        const actionData = JSON.parse(cleanResponse);
-        
-        if (actionData.action === 'create_task' && actionData.data) {
-           const { title, date, startTime, endTime, description } = actionData.data;
-           const taskDate = date || new Date().toISOString().split('T')[0];
-           
-           addTask({
-             id: crypto.randomUUID(),
-             title: title || '未命名任务',
-             date: taskDate,
-             startTime: startTime ? `${taskDate}T${startTime}:00` : undefined,
-             endTime: endTime ? `${taskDate}T${endTime}:00` : undefined,
-             hasTime: !!startTime,
-             isCompleted: false,
-             groupId: 'work', 
-             tagIds: [],
-             pomodoroCount: 0,
-             createdAt: new Date().toISOString(),
-             updatedAt: new Date().toISOString(),
-             description
-           });
-           
-           addChatMessage({ 
-             role: 'assistant', 
-             content: actionData.responseToUser || `✅ 已创建任务：**${title}**`, 
-             timestamp: Date.now() 
-           });
-           return;
+        // 提取可能的 JSON 部分（兼容 Markdown 代码块包裹的情况）
+        const jsonMatch = response.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const actionData = JSON.parse(jsonMatch[0]);
+          
+          if (actionData.action === 'create_task' && actionData.data) {
+             const { title, date, startTime, endTime, description } = actionData.data;
+             const taskDate = date || new Date().toISOString().split('T')[0];
+             
+             addTask({
+               id: crypto.randomUUID(),
+               title: title || '未命名任务',
+               date: taskDate,
+               startTime: startTime ? `${taskDate}T${startTime}:00` : undefined,
+               endTime: endTime ? `${taskDate}T${endTime}:00` : undefined,
+               hasTime: !!startTime,
+               isCompleted: false,
+               groupId: 'work', 
+               tagIds: [],
+               pomodoroCount: 0,
+               createdAt: new Date().toISOString(),
+               updatedAt: new Date().toISOString(),
+               description
+             });
+             
+             processedContent = actionData.responseToUser || `✅ 已为您创建任务：**${title}**`;
+          }
         }
       } catch (e) {
-        // Normal text response
+        // 解析失败，说明不是有效的动作指令，保持原始内容
       }
 
-      // Final assistant message is already handled inside sendMessageToAI via store
-      // But we need to keep UI consistent if there's any lag
+      addChatMessage({ 
+        role: 'assistant', 
+        content: processedContent, 
+        timestamp: Date.now() 
+      });
+
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       addChatMessage({ role: 'assistant', content: `错误: ${errorMessage}`, timestamp: Date.now() });
