@@ -4,6 +4,7 @@ import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import listPlugin from '@fullcalendar/list';
 import interactionPlugin from '@fullcalendar/interaction';
+import type { EventApi } from '@fullcalendar/core';
 import { useAppStore } from '../stores/useAppStore';
 import { format, parseISO, isValid, isSameDay, addDays, differenceInDays } from 'date-fns';
 import { Task, Deadline, RecurrenceFrequency } from '../types';
@@ -132,6 +133,34 @@ const CalendarView: React.FC = () => {
     setIsTaskDialogOpen(true);
   };
 
+  const buildEventUpdate = (event: EventApi, task: Task) => {
+    const start = event.start ?? (task.startTime ? parseISO(task.startTime) : null);
+    const end = event.end ?? (task.endTime ? parseISO(task.endTime) : null);
+    const date = start ? format(start, 'yyyy-MM-dd') : task.date;
+    const isMultiDay = !!(start && end && !isSameDay(start, end));
+    const endDate = end ? format(addDays(end, -1), 'yyyy-MM-dd') : undefined;
+
+    if (event.allDay) {
+      return {
+        date,
+        hasTime: false,
+        startTime: undefined,
+        endTime: undefined,
+        isMultiDay,
+        endDate: isMultiDay ? endDate : undefined,
+      };
+    }
+
+    return {
+      date,
+      hasTime: true,
+      startTime: start?.toISOString(),
+      endTime: end?.toISOString(),
+      isMultiDay,
+      endDate: isMultiDay ? endDate : undefined,
+    };
+  };
+
   // 自定义事件渲染：在列表视图中添加复选框
   const renderEventContent = (eventInfo: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
     const task = eventInfo.event.extendedProps as Task;
@@ -213,13 +242,11 @@ const CalendarView: React.FC = () => {
           }}
           eventDrop={(info) => {
             const task = info.event.extendedProps as Task;
-            updateTask(task.id, {
-              date: format(info.event.start!, 'yyyy-MM-dd'),
-              startTime: info.event.start?.toISOString(),
-              endTime: info.event.end?.toISOString(),
-              isMultiDay: !!(info.event.end && !isSameDay(info.event.start!, info.event.end!)),
-              endDate: info.event.end ? format(addDays(info.event.end, -1), 'yyyy-MM-dd') : undefined
-            });
+            updateTask(task.id, buildEventUpdate(info.event, task));
+          }}
+          eventResize={(info) => {
+            const task = info.event.extendedProps as Task;
+            updateTask(task.id, buildEventUpdate(info.event, task));
           }}
           eventOrder={["allDay", "start", "-duration", "title"]}
         />

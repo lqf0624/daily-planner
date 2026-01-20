@@ -6,15 +6,6 @@ interface HolidayConfig {
   workdays: string[]; // YYYY-MM-DD (调休上班)
 }
 
-interface HolidayDay {
-  date: string;
-  isOffDay: boolean;
-}
-
-interface HolidayResponse {
-  days: HolidayDay[];
-}
-
 // 默认 2026 年（示例，实际应从 API 获取）
 const defaultHolidayConfig: HolidayConfig = {
   holidays: [
@@ -40,7 +31,7 @@ const loadConfig = (): HolidayConfig => {
   return defaultHolidayConfig;
 };
 
-let currentConfig = loadConfig();
+const currentConfig = loadConfig();
 
 export const isWorkday = (dateStr: string): boolean => {
   const date = parseISO(dateStr);
@@ -49,31 +40,4 @@ export const isWorkday = (dateStr: string): boolean => {
   if (currentConfig.holidays.includes(dateStr)) return false;
   
   return !isWeekend(date);
-};
-
-export const isHoliday = (dateStr: string): boolean => {
-  return currentConfig.holidays.includes(dateStr);
-};
-
-export const fetchHolidayData = async () => {
-  try {
-    const year = new Date().getFullYear();
-    const response = await fetch(`https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/${year}.json`);
-    if (response.ok) {
-      const data = (await response.json()) as HolidayResponse;
-      const config: HolidayConfig = {
-        holidays: data.days.filter((d: HolidayDay) => d.isOffDay).map((d: HolidayDay) => d.date),
-        workdays: data.days.filter((d: HolidayDay) => !d.isOffDay && (new Date(d.date).getDay() === 0 || new Date(d.date).getDay() === 6)).map((d: HolidayDay) => d.date)
-      };
-      
-      currentConfig = config;
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('holidayConfig', JSON.stringify(config));
-      }
-      return true;
-    }
-  } catch (e) {
-    console.warn('Failed to fetch holiday data, using defaults/cache', e);
-  }
-  return false;
 };

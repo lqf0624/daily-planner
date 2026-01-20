@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { Task, Group, QuarterlyGoal, WeeklyPlan, PomodoroSettings, PomodoroHistory, AISettings, ChatMessage, Habit, Deadline, AppNotification } from '../types';
+import { Task, Group, QuarterlyGoal, WeeklyPlan, PomodoroSettings, PomodoroHistory, AISettings, ChatMessage, Habit, Deadline } from '../types';
 
 interface AppState {
   tasks: Task[];
@@ -13,17 +13,13 @@ interface AppState {
   pomodoroHistory: PomodoroHistory;
   aiSettings: AISettings;
   chatHistory: ChatMessage[];
-  lastNotif: AppNotification | null;
-  language: 'zh-CN' | 'en-US';
   isSettingsOpen: boolean;
   isPomodoroMiniPlayer: boolean;
   _hasHydrated: boolean;
   
   setIsSettingsOpen: (isOpen: boolean) => void;
-  setLastNotif: (n: AppNotification | null) => void;
   setIsPomodoroMiniPlayer: (isMini: boolean) => void;
   setHasHydrated: (state: boolean) => void;
-  setLanguage: (lang: 'zh-CN' | 'en-US') => void;
   importData: (data: Partial<AppState>) => void; 
 
   addTask: (task: Task) => void;
@@ -90,17 +86,13 @@ export const useAppStore = create<AppState>()(
       chatHistory: [
         { role: 'assistant', content: '你好！我是你的 AI 任务助手。我已经准备好为您服务了。', timestamp: Date.now() }
       ],
-      lastNotif: null,
-      language: 'zh-CN',
       isSettingsOpen: false,
       isPomodoroMiniPlayer: false,
       _hasHydrated: false,
 
       setIsSettingsOpen: (isOpen) => set({ isSettingsOpen: isOpen }),
-      setLastNotif: (n) => set({ lastNotif: n }),
       setIsPomodoroMiniPlayer: (isMini) => set({ isPomodoroMiniPlayer: isMini }),
       setHasHydrated: (state) => set({ _hasHydrated: state }),
-      setLanguage: (lang) => set({ language: lang }),
       
       importData: (data) => set((state) => ({
         tasks: data.tasks || state.tasks,
@@ -112,12 +104,15 @@ export const useAppStore = create<AppState>()(
         pomodoroSettings: data.pomodoroSettings || state.pomodoroSettings,
         pomodoroHistory: data.pomodoroHistory || state.pomodoroHistory,
         aiSettings: data.aiSettings || state.aiSettings,
-        language: data.language || state.language,
       })),
 
       addTask: (task) => set((state) => ({ tasks: [...state.tasks, task] })),
       updateTask: (id, updates) => set((state) => ({
-        tasks: state.tasks.map((t) => (t.id === id ? { ...t, ...updates } : t))
+        tasks: state.tasks.map((t) => {
+          if (t.id !== id) return t;
+          const updatedAt = typeof updates.updatedAt === 'string' ? updates.updatedAt : new Date().toISOString();
+          return { ...t, ...updates, updatedAt };
+        })
       })),
       deleteTask: (id) => set((state) => ({ tasks: state.tasks.filter((t) => t.id !== id) })),
 
@@ -196,13 +191,16 @@ export const useAppStore = create<AppState>()(
       })),
       logPomodoroSession: (date, minutes) => set((state) => {
         if (minutes <= 0) return state;
-        const prev = state.pomodoroHistory[date] || { minutes: 0, sessions: 0 };
+        const now = Date.now();
+        const prev = state.pomodoroHistory[date] || { minutes: 0, sessions: 0, entries: [] };
+        const prevEntries = prev.entries || [];
         return {
           pomodoroHistory: {
             ...state.pomodoroHistory,
             [date]: {
               minutes: (prev.minutes || 0) + minutes,
               sessions: (prev.sessions || 0) + 1,
+              entries: [...prevEntries, { ts: now, minutes }],
             },
           },
         };

@@ -10,9 +10,10 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { listen } from '@tauri-apps/api/event';
 import { exit, relaunch } from '@tauri-apps/plugin-process';
 import { check } from '@tauri-apps/plugin-updater';
-import { format, isWithinInterval, parseISO, setHours, setMinutes, getISOWeek, getISOWeekYear, subWeeks } from 'date-fns';
+import { format, getISOWeek, getISOWeekYear, subWeeks } from 'date-fns';
 import { isWorkday } from './utils/holidays';
 import { invoke } from '@tauri-apps/api/core';
+import { getOngoingTask, parseTaskTime } from './utils/taskActivity';
 
 import CalendarView from './components/CalendarView';
 import QuarterlyGoals from './components/QuarterlyGoals';
@@ -60,15 +61,9 @@ function App() {
   const [needsLastWeekReview, setNeedsLastWeekReview] = useState(false);
   const [incompleteGoalsCount, setIncompleteGoalsCount] = useState(0);
 
-  const pushNotification = useCallback((title: string, message: string, kind: string) => {
-    invoke('show_custom_notification', { title, message, kind }).catch(console.error);
+  const pushNotification = useCallback((title: string, body: string) => {
+    invoke('show_notification', { title, body }).catch(console.error);
   }, []);
-
-  const parseTaskTime = (dateStr: string, timeValue: string) => {
-    if (timeValue.includes('T')) return parseISO(timeValue);
-    const [hours, minutes] = timeValue.split(':').map(Number);
-    return setMinutes(setHours(parseISO(dateStr), hours), minutes);
-  };
 
   useEffect(() => {
     if (view !== 'main') return;
@@ -77,32 +72,8 @@ function App() {
       const now = new Date();
       const todayStr = format(now, 'yyyy-MM-dd');
       const timeStr = format(now, 'HH:mm');
-      
-      const active = tasks
-        .filter(t => {
-          if (t.isCompleted) return false;
-          try {
-            // 必须涵盖今天
-            if (t.isMultiDay && t.endDate) return todayStr >= t.date && todayStr <= t.endDate;
-            return t.date === todayStr;
-          } catch { return false; }
-        })
-        .sort((a, b) => {
-          // 优先级 0: 当前具体时段
-          const isNowA = a.hasTime && a.startTime && a.endTime && isWithinInterval(now, { start: parseTaskTime(a.date, a.startTime), end: parseTaskTime(a.date, a.endTime) });
-          const isNowB = b.hasTime && b.startTime && b.endTime && isWithinInterval(now, { start: parseTaskTime(b.date, b.startTime), end: parseTaskTime(b.date, b.endTime) });
-          if (isNowA && !isNowB) return -1;
-          if (!isNowA && isNowB) return 1;
+      const active = getOngoingTask(tasks, now);
 
-          // 优先级 1: 今日全天 (非跨天)
-          const isTodayA = !a.isMultiDay && !a.hasTime;
-          const isTodayB = !b.isMultiDay && !b.hasTime;
-          if (isTodayA && !isTodayB) return -1;
-          if (!isTodayA && isTodayB) return 1;
-
-          return 0;
-        })[0];
-      
       setActiveTask(active ? { title: active.title, id: active.id } : null);
 
       const curWeek = getISOWeek(now);
@@ -124,10 +95,21 @@ function App() {
             let isDue = habit.frequency === 'daily' || (habit.frequency === 'custom' && habit.customDays.includes(now.getDay()));
             if (habit.smartWorkdayOnly && !isWorkday(todayStr)) isDue = false;
             if (isDue && !habit.completedDates.includes(todayStr)) {
-              pushNotification('习惯提醒', `该执行“${habit.name}”啦！`, 'habit');
+              pushNotification('习惯提醒', `该执行“${habit.name}”啦！`);
             }
           }
         });
+
+        // Task Start Notification
+        tasks.forEach(t => {
+          if (!t.isCompleted && t.hasTime && t.startTime) {
+            const start = parseTaskTime(t.date, t.startTime);
+            if (format(start, 'yyyy-MM-dd') === todayStr && format(start, 'HH:mm') === timeStr) {
+              pushNotification('日程提醒', `任务“${t.title}”开始啦！`);
+            }
+          }
+        });
+
         lastCheckedMinute = timeStr;
       }
     };
@@ -138,21 +120,34 @@ function App() {
 
   useEffect(() => {
     if (view !== 'main') return;
-    const unlistenCompleted = listen<number>('pomodoro_completed', () => pushNotification('专注完成', '太棒了，休息一下吧！', 'system'));
-    const unlistenBreak = listen('break_completed', () => pushNotification('休息结束', '开始下一轮专注吧。', 'system'));
+    // Removed duplicate listeners if they are already handled by main.rs notifications, 
+    // BUT main.rs notifications are generic. If we want these custom messages from App.tsx, we keep them.
+    // However, since main.rs sends them too, we might have duplicates. 
+    // The user asked to replace "Status switched" text. I did that in main.rs.
+    // If App.tsx also sends notifications, we will have two notifications per event.
+    // I will keep these but update pushNotification usage to match the new signature.
+    // Actually, I should probably remove these listeners if main.rs is already sending notifications for Pomodoro completion.
+    // Let's comment them out or remove them to avoid duplicates, as main.rs is the source of truth for the timer loop.
+    // Wait, main.rs sends "专注结束" / "休息结束". App.tsx sends "专注完成" / "休息结束".
+    // I will remove the listeners here to rely on the backend (main.rs) which I just updated.
+    // This solves the text issue definitively.
+    
+    // const unlistenCompleted = listen<number>('pomodoro_completed', () => pushNotification('专注完成', '太棒了，休息一下吧！'));
+    // const unlistenBreak = listen('break_completed', () => pushNotification('休息结束', '开始下一轮专注吧。'));
+    
     const unlistenTab = listen<string>('app:open-tab', (e) => setActiveTab(e.payload));
     const unlistenUpdate = listen('app:check-for-updates-request', async () => {
       try {
         const update = await check();
         if (update?.available) {
-          pushNotification('更新可用', `版本 ${update.version} 已就绪。`, 'system');
+          pushNotification('更新可用', `版本 ${update.version} 已就绪。`);
           await update.downloadAndInstall();
           await relaunch();
         }
       } catch (e) { console.error(e); }
     });
     return () => { 
-      unlistenCompleted.then(f => f()); unlistenBreak.then(f => f());
+      // unlistenCompleted.then(f => f()); unlistenBreak.then(f => f());
       unlistenTab.then(f => f()); unlistenUpdate.then(f => f());
     };
   }, [view, pushNotification]);

@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Switch } from './ui/switch';
 import { Label } from './ui/label';
 import { Input } from './ui/input';
-import { startOfWeek, startOfMonth, format, parseISO, isWithinInterval, endOfWeek, endOfMonth, eachDayOfInterval } from 'date-fns';
+import { startOfWeek, startOfMonth, format, endOfWeek, endOfMonth, eachDayOfInterval } from 'date-fns';
 
 // 内嵌统计组件
 const PomodoroStats = ({ onClose }: { onClose: () => void }) => {
@@ -21,7 +21,6 @@ const PomodoroStats = ({ onClose }: { onClose: () => void }) => {
   
   const stats = useMemo(() => {
     const now = new Date();
-    const data = Object.entries(pomodoroHistory);
     
     let totalMinutes = 0;
     let totalSessions = 0;
@@ -29,38 +28,59 @@ const PomodoroStats = ({ onClose }: { onClose: () => void }) => {
 
     if (range === 'day') {
       const todayStr = format(now, 'yyyy-MM-dd');
-      const todayStats = pomodoroHistory[todayStr] || { minutes: 0, sessions: 0 };
-      totalMinutes = todayStats.minutes;
-      totalSessions = todayStats.sessions;
-      // 模拟时段分布（真实数据需要后端支持记录具体时间点，这里简化展示最近7天趋势作为替代）
-      chartData = eachDayOfInterval({ start: startOfWeek(now), end: now }).map(d => {
-        const dStr = format(d, 'yyyy-MM-dd');
-        return { label: format(d, 'EEE'), value: (pomodoroHistory[dStr]?.minutes || 0) };
-      });
+      const todayStats = pomodoroHistory[todayStr];
+      const entries = todayStats?.entries || [];
+
+      if (entries.length > 0) {
+        const bucketSize = 4;
+        const bucketCount = 24 / bucketSize;
+        chartData = Array.from({ length: bucketCount }, (_, i) => ({
+          label: `${String(i * bucketSize).padStart(2, '0')}:00`,
+          value: 0,
+        }));
+
+        entries.forEach((entry) => {
+          const hour = new Date(entry.ts).getHours();
+          const bucketIndex = Math.min(bucketCount - 1, Math.floor(hour / bucketSize));
+          chartData[bucketIndex].value += entry.minutes;
+        });
+
+        totalMinutes = chartData.reduce((sum, item) => sum + item.value, 0);
+        totalSessions = todayStats?.sessions || entries.length;
+      } else {
+        const minutes = todayStats?.minutes || 0;
+        totalMinutes = minutes;
+        totalSessions = todayStats?.sessions || 0;
+        chartData = [{ label: '今日', value: minutes }];
+      }
     } else if (range === 'week') {
       const start = startOfWeek(now);
       const end = endOfWeek(now);
-      chartData = eachDayOfInterval({ start, end }).map(d => {
+      const days = eachDayOfInterval({ start, end });
+      chartData = days.map(d => {
         const dStr = format(d, 'yyyy-MM-dd');
         const dayStats = pomodoroHistory[dStr];
-        if (dayStats) {
-          totalMinutes += dayStats.minutes;
-          totalSessions += dayStats.sessions;
-        }
         return { label: format(d, 'EEE'), value: (dayStats?.minutes || 0) };
       });
+      totalMinutes = chartData.reduce((sum, item) => sum + item.value, 0);
+      totalSessions = days.reduce((sum, d) => {
+        const dStr = format(d, 'yyyy-MM-dd');
+        return sum + (pomodoroHistory[dStr]?.sessions || 0);
+      }, 0);
     } else {
       const start = startOfMonth(now);
       const end = endOfMonth(now);
-      // 月视图按周聚合，或者显示每一天（太挤），这里简化为累积数据
-      data.forEach(([dStr, s]) => {
-        if (isWithinInterval(parseISO(dStr), { start, end })) {
-          totalMinutes += s.minutes;
-          totalSessions += s.sessions;
-        }
+      const days = eachDayOfInterval({ start, end });
+      chartData = days.map(d => {
+        const dStr = format(d, 'yyyy-MM-dd');
+        const dayStats = pomodoroHistory[dStr];
+        return { label: format(d, 'd'), value: (dayStats?.minutes || 0) };
       });
-      // 图表显示最近 4 周
-      chartData = [1, 2, 3, 4].map(w => ({ label: `W${w}`, value: Math.round(totalMinutes / 4) })); // 简化 placeholder
+      totalMinutes = chartData.reduce((sum, item) => sum + item.value, 0);
+      totalSessions = days.reduce((sum, d) => {
+        const dStr = format(d, 'yyyy-MM-dd');
+        return sum + (pomodoroHistory[dStr]?.sessions || 0);
+      }, 0);
     }
 
     return { totalMinutes, totalSessions, chartData };
@@ -115,8 +135,8 @@ const PomodoroStats = ({ onClose }: { onClose: () => void }) => {
         </h4>
         <div className="flex items-end justify-between h-32 gap-2">
           {stats.chartData.map((d, i) => (
-            <div key={i} className="flex-1 flex flex-col items-center gap-2 group">
-              <div className="w-full bg-slate-100 rounded-t-lg relative overflow-hidden h-full flex items-end">
+            <div key={i} className="flex-1 flex flex-col items-center gap-2 group h-full">
+              <div className="w-full bg-slate-100 rounded-t-lg relative overflow-hidden flex-1 flex items-end">
                 <div 
                   className="w-full bg-primary/80 group-hover:bg-primary transition-all duration-500 rounded-t-lg"
                   style={{ height: `${(d.value / maxVal) * 100}%` }}

@@ -89,22 +89,20 @@ export interface PomodoroSettings {
   stopAfterLongBreak: boolean;
 }
 
+export interface PomodoroSessionEntry {
+  ts: number;
+  minutes: number;
+}
+
 export interface PomodoroDailyStats {
   minutes: number;
   sessions: number;
+  entries?: PomodoroSessionEntry[];
 }
 
 export type PomodoroMode = 'work' | 'shortBreak' | 'longBreak';
 
 export type PomodoroHistory = Record<string, PomodoroDailyStats>;
-
-export interface AppNotification {
-  id: string;
-  title: string;
-  message: string;
-  type: 'task' | 'habit' | 'deadline' | 'system';
-  timestamp: number;
-}
 
 export interface AISettings {
   baseUrl: string;

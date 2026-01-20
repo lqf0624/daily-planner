@@ -14,6 +14,8 @@ use tauri::{
   image::Image
 };
 use tauri_plugin_notification::NotificationExt;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use notify_rust::Notification as NotifyRustNotification;
 use tokio::time::{interval, Duration};
 use chrono::Local;
 
@@ -36,6 +38,7 @@ pub struct PomodoroState {
   pub is_active: bool,
   pub mode: String,
   pub sessions_completed: u32,
+  pub last_date: String,
   pub settings: PomodoroSettings,
 }
 
@@ -48,7 +51,6 @@ pub struct PomodoroPersistentState {
 struct AppState {
   state: Arc<Mutex<PomodoroState>>,
   config_path: PathBuf,
-  state_path: PathBuf,
 }
 
 impl Default for PomodoroSettings {
@@ -98,6 +100,84 @@ fn perform_open_main(handle: &AppHandle) {
     let _ = window.show();
     let _ = window.unminimize();
     let _ = window.set_focus();
+  } else if let Some(config) = handle.config().app.windows.iter().find(|w| w.label == "main") {
+    if let Ok(window) = tauri::WebviewWindowBuilder::from_config(handle, config).and_then(|builder| builder.build()) {
+      let _ = window.show();
+      let _ = window.set_focus();
+    }
+  }
+}
+
+fn show_system_notification(handle: &AppHandle, title: &str, body: &str) {
+  #[cfg(target_os = "windows")]
+  {
+    let identifier = handle.config().identifier.clone();
+    let title = title.to_string();
+    let body = body.to_string();
+    let handle = handle.clone();
+
+    let _ = handle.run_on_main_thread(move || {
+      let mut notification = NotifyRustNotification::new();
+      notification.summary(&title);
+      notification.body(&body);
+      notification.auto_icon();
+      notification.app_id(&identifier);
+
+      if notification.show().is_ok() {
+        return;
+      }
+
+      let mut fallback = NotifyRustNotification::new();
+      fallback.summary(&title);
+      fallback.body(&body);
+      fallback.auto_icon();
+      let _ = fallback.show();
+    });
+
+    return;
+  }
+
+  #[cfg(target_os = "macos")]
+  {
+    let identifier = handle.config().identifier.clone();
+    let title = title.to_string();
+    let body = body.to_string();
+
+    tauri::async_runtime::spawn(async move {
+      let mut notification = NotifyRustNotification::new();
+      notification.summary(&title);
+      notification.body(&body);
+      notification.auto_icon();
+
+      let preferred_app_id = identifier;
+
+      let mut application = preferred_app_id.clone();
+      if notify_rust::set_application(&application).is_err() && application != "com.apple.Terminal" {
+        application = "com.apple.Terminal".to_string();
+        let _ = notify_rust::set_application(&application);
+      }
+
+      let result = notification.show();
+      if result.is_err() && application != "com.apple.Terminal" {
+        if notify_rust::set_application("com.apple.Terminal").is_ok() {
+          let mut fallback = NotifyRustNotification::new();
+          fallback.summary(&title);
+          fallback.body(&body);
+          fallback.auto_icon();
+          let _ = fallback.show();
+        }
+      }
+    });
+  }
+
+  #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+  {
+    let _ = handle
+      .notification()
+      .builder()
+      .title(title)
+      .body(body)
+      .show();
   }
 }
 
@@ -112,7 +192,14 @@ fn get_pomodoro_state(state: tauri::State<'_, AppState>) -> PomodoroState {
 #[tauri::command]
 fn toggle_timer(state: tauri::State<'_, AppState>, handle: AppHandle) {
   let mut s = state.state.lock().unwrap();
+  let was_active = s.is_active;
   s.is_active = !s.is_active;
+
+  // 专注开始提醒：手动启动 / 继续专注时触发
+  if !was_active && s.is_active && s.mode == "work" {
+    show_system_notification(&handle, "专注开始", "开始专注，保持节奏！");
+  }
+
   let _ = handle.emit("pomodoro_tick", s.clone());
 }
 
@@ -160,7 +247,7 @@ fn update_settings(settings: PomodoroSettings, state: tauri::State<'_, AppState>
 
 #[tauri::command]
 fn show_notification(title: String, body: String, handle: AppHandle) {
-  let _ = handle.notification().builder().title(title).body(body).show();
+  show_system_notification(&handle, &title, &body);
 }
 
 #[tauri::command]
@@ -184,7 +271,10 @@ async fn toggle_floating_window(handle: tauri::AppHandle) {
 }
 
 fn main() {
-  tauri::Builder::default()
+  let app = tauri::Builder::default()
+    .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+      perform_open_main(app);
+    }))
     .plugin(tauri_plugin_shell::init())
     .plugin(tauri_plugin_notification::init())
     .plugin(tauri_plugin_process::init())
@@ -209,9 +299,9 @@ fn main() {
       let settings = load_settings(&config_path);
       let p_state = load_persistent_state(&state_path);
       
-      let initial_state = PomodoroState { time_left: settings.work_duration.max(1) * 60, is_active: false, mode: "work".to_string(), sessions_completed: p_state.sessions_completed, settings };
+      let initial_state = PomodoroState { time_left: settings.work_duration.max(1) * 60, is_active: false, mode: "work".to_string(), sessions_completed: p_state.sessions_completed, last_date: p_state.last_date, settings };
       let state_ptr = Arc::new(Mutex::new(initial_state));
-      app.manage(AppState { state: state_ptr.clone(), config_path, state_path: state_path.clone() });
+      app.manage(AppState { state: state_ptr.clone(), config_path });
 
       let show_i = MenuItem::with_id(app, "show", "显示主界面", true, None::<&str>).unwrap();
       let quit_i = MenuItem::with_id(app, "quit", "彻底退出应用", true, None::<&str>).unwrap();
@@ -239,6 +329,12 @@ fn main() {
         loop {
           interval.tick().await;
           let mut s = state_ptr_timer.lock().unwrap();
+          let today = Local::now().format("%Y-%m-%d").to_string();
+          if s.last_date != today {
+            s.last_date = today;
+            s.sessions_completed = 0;
+            save_persistent_state(&state_path, s.sessions_completed);
+          }
           if s.is_active {
             if s.time_left > 0 { s.time_left -= 1; }
             else {
@@ -254,6 +350,7 @@ fn main() {
                    s.time_left = (if is_long { s.settings.long_break_duration.max(1) } else { s.settings.short_break_duration.max(1) }) * 60;
                    s.is_active = s.settings.auto_start_breaks;
                 }
+                show_system_notification(&handle, "专注结束", "一轮专注完成，起身放松一下吧。");
               } else {
                 let was_long = s.mode == "longBreak";
                 let _ = handle.emit("break_completed", ());
@@ -263,8 +360,12 @@ fn main() {
                    s.time_left = s.settings.work_duration.max(1) * 60;
                    s.is_active = s.settings.auto_start_pomodoros;
                 }
+                if s.mode == "work" && s.is_active {
+                  show_system_notification(&handle, "专注开始", "休息完成，开始下一轮专注吧！");
+                } else {
+                  show_system_notification(&handle, "休息结束", "休息完成，可以开始下一轮专注了。");
+                }
               }
-              let _ = handle.notification().builder().title("番茄钟完成").body("状态已切换").show();
             }
             let _ = handle.emit("pomodoro_tick", s.clone());
           }
@@ -286,6 +387,13 @@ fn main() {
       Ok(())
     })
     .invoke_handler(tauri::generate_handler![get_pomodoro_state, toggle_timer, reset_timer, skip_mode, update_settings, open_main, show_notification, toggle_floating_window])
-    .run(tauri::generate_context!())
+    .build(tauri::generate_context!())
     .expect("error");
+
+  app.run(|_app_handle, _event| {
+    #[cfg(target_os = "macos")]
+    if let tauri::RunEvent::Reopen { .. } = _event {
+      perform_open_main(_app_handle);
+    }
+  });
 }

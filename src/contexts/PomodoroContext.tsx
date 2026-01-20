@@ -11,6 +11,7 @@ type PomodoroState = {
   is_active: boolean;
   mode: string;
   sessions_completed: number;
+  last_date: string;
   settings: {
     work_duration: number;
     short_break_duration: number;
@@ -41,23 +42,33 @@ const PomodoroContext = createContext<PomodoroContextValue | null>(null);
 export const PomodoroProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { pomodoroSettings: localSettings, updatePomodoroSettings: updateStore, logPomodoroSession } = useAppStore();
   const [state, setState] = useState<PomodoroState | null>(null);
+  const syncSessionsFromState = useCallback((nextState: PomodoroState | null) => {
+    if (!nextState) return;
+    const dateKey = nextState.last_date || format(new Date(), 'yyyy-MM-dd');
+    const { pomodoroHistory } = useAppStore.getState();
+    const loggedSessions = pomodoroHistory[dateKey]?.sessions || 0;
+    const delta = nextState.sessions_completed - loggedSessions;
+    if (delta <= 0) return;
+    for (let i = 0; i < delta; i += 1) {
+      logPomodoroSession(dateKey, nextState.settings.work_duration);
+    }
+  }, [logPomodoroSession]);
 
   useEffect(() => {
-    invoke<PomodoroState>('get_pomodoro_state').then(s => setState(s));
+    invoke<PomodoroState>('get_pomodoro_state').then(s => {
+      setState(s);
+      syncSessionsFromState(s);
+    });
 
     const unlisten = listen<PomodoroState>('pomodoro_tick', (event) => {
       setState(event.payload);
-    });
-
-    const unlistenCompleted = listen<number>('pomodoro_completed', (event) => {
-      logPomodoroSession(format(new Date(), 'yyyy-MM-dd'), event.payload);
+      syncSessionsFromState(event.payload);
     });
 
     return () => {
       unlisten.then(f => f());
-      unlistenCompleted.then(f => f());
     };
-  }, [logPomodoroSession]);
+  }, [logPomodoroSession, syncSessionsFromState]);
 
   const toggleTimer = useCallback(() => invoke('toggle_timer'), []);
   const resetTimer = useCallback(() => invoke('reset_timer'), []);

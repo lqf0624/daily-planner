@@ -1,20 +1,41 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Pause, Pin, PinOff, Play, RotateCcw, SquareArrowOutUpRight, FastForward, Maximize2, Minimize2 } from 'lucide-react';
 import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
 import { usePomodoro } from '../contexts/PomodoroContext';
 import { useAppStore } from '../stores/useAppStore';
 import { cn } from '../utils/cn';
+import { getOngoingTask } from '../utils/taskActivity';
 
 const getWin = () => { try { return getCurrentWindow(); } catch (e) { return null; } };
 
 const FloatingPomodoro: React.FC = () => {
   const { timeLeft, isActive, mode, toggleTimer, resetTimer, skipMode, pomodoroSettings } = usePomodoro();
-  const { isPomodoroMiniPlayer, setIsPomodoroMiniPlayer } = useAppStore();
+  const { isPomodoroMiniPlayer, setIsPomodoroMiniPlayer, tasks } = useAppStore();
   const [alwaysOnTop, setAlwaysOnTop] = useState(true);
+  const [now, setNow] = useState(() => new Date());
+  const [showTask, setShowTask] = useState(false);
   
   const [isPressingSkip, setIsPressingSkip] = useState(false);
   const skipTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 30000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const activeTask = useMemo(() => getOngoingTask(tasks, now), [tasks, now]);
+  const activeTaskId = activeTask?.id;
+
+  useEffect(() => {
+    if (!activeTaskId) {
+      setShowTask(false);
+      return;
+    }
+    setShowTask(false);
+    const carousel = setInterval(() => setShowTask(prev => !prev), 5000);
+    return () => clearInterval(carousel);
+  }, [activeTaskId]);
 
   useEffect(() => {
     // 迷你条高度微调为 46px 以适应边框对齐
@@ -103,7 +124,24 @@ const FloatingPomodoro: React.FC = () => {
             <button onClick={(e) => { e.stopPropagation(); toggleTimer(); }} className="p-1 text-slate-600 hover:text-primary transition-colors cursor-pointer active:scale-90 flex items-center justify-center">
               {isActive ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
             </button>
-            <div className="text-sm font-black tabular-nums text-slate-800 tracking-tight leading-none">{timeText}</div>
+            <div className="relative h-4 w-[86px] overflow-hidden">
+              <div className={cn(
+                "absolute inset-0 flex items-center transition-all duration-500",
+                showTask && activeTask ? "opacity-0 -translate-y-2" : "opacity-100 translate-y-0"
+              )}>
+                <div className="text-sm font-black tabular-nums text-slate-800 tracking-tight leading-none">{timeText}</div>
+              </div>
+              {activeTask && (
+                <div className={cn(
+                  "absolute inset-0 flex items-center transition-all duration-500",
+                  showTask ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2"
+                )}>
+                  <div className="text-[10px] font-black text-slate-600 truncate" title={activeTask.title}>
+                    {activeTask.title}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-1.5">
             <button 
@@ -147,9 +185,25 @@ const FloatingPomodoro: React.FC = () => {
           className="relative flex h-[110px] w-[110px] items-center justify-center rounded-full p-[4px]"
           style={{ background: `conic-gradient(${ringColor} ${Math.round((1 - timeLeft / (mode === 'work' ? pomodoroSettings.workDuration * 60 : (mode === 'shortBreak' ? pomodoroSettings.shortBreakDuration * 60 : pomodoroSettings.longBreakDuration * 60))) * 360)}deg, #f1f5f9 0deg)` }}
         >
-          <div className="relative z-10 flex h-full w-full flex-col items-center justify-center rounded-full bg-white shadow-inner">
-            <div className="text-2xl font-black tabular-nums text-slate-800 tracking-tighter leading-none">{timeText}</div>
-            <div className="mt-1 text-[8px] uppercase tracking-[0.2em] font-bold text-slate-400">{isActive ? (mode === 'work' ? 'Working' : 'Resting') : 'Paused'}</div>
+          <div className="relative z-10 flex h-full w-full flex-col items-center justify-center rounded-full bg-white shadow-inner overflow-hidden">
+            <div className={cn(
+              "flex flex-col items-center transition-all duration-500",
+              showTask && activeTask ? "opacity-0 -translate-y-2" : "opacity-100 translate-y-0"
+            )}>
+              <div className="text-2xl font-black tabular-nums text-slate-800 tracking-tighter leading-none">{timeText}</div>
+              <div className="mt-1 text-[8px] uppercase tracking-[0.2em] font-bold text-slate-400">{isActive ? (mode === 'work' ? 'Working' : 'Resting') : 'Paused'}</div>
+            </div>
+            {activeTask && (
+              <div className={cn(
+                "absolute inset-0 flex flex-col items-center justify-center px-4 text-center transition-all duration-500",
+                showTask ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2"
+              )}>
+                <div className="text-[8px] uppercase tracking-[0.2em] font-black text-primary">Ongoing</div>
+                <div className="mt-1 text-[11px] font-black text-slate-700 line-clamp-2" title={activeTask.title}>
+                  {activeTask.title}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

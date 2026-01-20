@@ -60,11 +60,14 @@ npm run build:mac
 
 ### macOS
 由于应用尚未在 Apple 开发者中心注册签名，安装后请执行以下操作：
+0. **先安装到 Applications**：请将 `.app` 从 `.dmg` 拖到 `/Applications` 后再打开（不要直接在 `.dmg` 里运行）。  
+   若你把 `.dmg` 内的应用拖到 Dock/桌面创建了快捷方式，推出 `.dmg` 后可能会出现“无图标/无法启动”；删除该快捷方式，再从 `/Applications` 重新拖一次即可。
 1. **解除系统隔离**：若无法直接打开，请打开“终端”应用，输入以下命令并回车：
    ```bash
    sudo xattr -rd com.apple.quarantine /Applications/daily-planner.app
    ```
 2. **右键打开**：首次运行建议在访达中“右键 -> 打开”，在弹出的提示中再次点击“打开”。
+3. **图标自检（可选）**：在仓库根目录执行 `./scripts/verify-macos-icon.sh /Applications/daily-planner.app`。
 
 ## 核心功能
 
