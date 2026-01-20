@@ -13,6 +13,7 @@ use tauri::{
   tray::{TrayIconBuilder, TrayIconEvent, MouseButton},
   image::Image
 };
+#[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
 use tauri_plugin_notification::NotificationExt;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use notify_rust::Notification as NotifyRustNotification;

@@ -2,7 +2,7 @@
   "name": "daily-planner-ai",
   "description": "Daily planner desktop app for tasks, timeline, habits, pomodoro, and weekly reviews.",
   "private": true,
-  "version": "0.2.3",
+  "version": "0.2.4",
   "author": "lqf0624",
   "type": "module",
   "scripts": {

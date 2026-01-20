@@ -1,6 +1,6 @@
 {
   "productName": "daily-planner",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "identifier": "com.dailyplanner.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -57,7 +57,7 @@
     "shortDescription": "A smart daily planner with AI support",
     "macOS": {
       "files": {
-        "icons/icon.icns": "Resources/icon.icns"
+        "Resources/icon.icns": "icons/icon.icns"
       }
     },
     "icon": [
