@@ -17,23 +17,36 @@
         "minWidth": 1000,
         "minHeight": 700,
         "resizable": true,
-        "decorations": false,
-        "transparent": true,
+        "decorations": true,
+        "transparent": false,
         "label": "main",
         "url": "index.html",
         "visible": true
       },
       {
         "title": "Floating",
-        "width": 220,
-        "height": 220,
-        "resizable": false,
+        "width": 300,
+        "height": 184,
+        "resizable": true,
         "decorations": false,
-        "transparent": true,
+        "transparent": false,
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "label": "floating",
         "url": "/?view=floating",
+        "visible": false
+      },
+      {
+        "title": "Floating Settings",
+        "width": 440,
+        "height": 420,
+        "resizable": true,
+        "decorations": true,
+        "transparent": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "label": "floating-settings",
+        "url": "/?view=floating-settings",
         "visible": false
       }
     ],
@@ -56,6 +69,7 @@
     "copyright": "Copyright © 2026 lqf0624",
     "shortDescription": "A smart daily planner with AI support",
     "macOS": {
+      "infoPlist": "Info.plist",
       "files": {
         "Resources/icon.icns": "icons/icon.icns"
       }
@@ -66,6 +80,11 @@
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.ico"
+    ],
+    "resources": [
+      "../public/tray-work-mac.png",
+      "../public/tray-rest-mac.png",
+      "../public/sounds"
     ]
   }
 }

@@ -1,182 +1,163 @@
-import { useState } from 'react';
-import { Target, Plus, Trash2, Trophy, Hourglass } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { differenceInCalendarDays, endOfQuarter, getQuarter, startOfQuarter } from 'date-fns';
+import { BarChart3, Link2, Plus, Target, Trash2 } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
 import { QuarterlyGoal } from '../types';
 import { Button } from './ui/button';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { Input } from './ui/input';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
-import { cn } from '../utils/cn';
-import { format, differenceInDays, startOfQuarter, endOfQuarter, getQuarter } from 'date-fns';
+
+const createGoal = (): QuarterlyGoal => {
+  const now = new Date();
+  return {
+    id: '',
+    title: '',
+    description: '',
+    quarter: getQuarter(now),
+    year: now.getFullYear(),
+    progress: 0,
+    isCompleted: false,
+    weeklyGoalIds: [],
+    taskIds: [],
+  };
+};
 
 const QuarterlyGoals = () => {
-  const { goals, addGoal, updateGoal, deleteGoal } = useAppStore();
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [editingGoal, setEditingGoal] = useState<Partial<QuarterlyGoal> | null>(null);
-
+  const { goals, weeklyPlans, tasks, addGoal, updateGoal, deleteGoal } = useAppStore();
+  const [draft, setDraft] = useState<QuarterlyGoal>(createGoal());
+  const [open, setOpen] = useState(false);
   const now = new Date();
-  const currentQuarter = getQuarter(now);
-  const currentYear = now.getFullYear();
-  
-  // 季度时间进度计算
-  const qStart = startOfQuarter(now);
-  const qEnd = endOfQuarter(now);
-  const totalDays = differenceInDays(qEnd, qStart) + 1;
-  const passedDays = differenceInDays(now, qStart) + 1;
-  const remainingDays = totalDays - passedDays;
-  const progressPercent = Math.round((passedDays / totalDays) * 100);
+  const quarter = getQuarter(now);
+  const year = now.getFullYear();
 
-  const currentGoals = goals.filter(g => g.year === currentYear && g.quarter === currentQuarter);
+  const currentGoals = useMemo(() => goals.filter((goal) => goal.quarter === quarter && goal.year === year), [goals, quarter, year]);
+  const quarterStart = startOfQuarter(now);
+  const quarterEnd = endOfQuarter(now);
+  const passedDays = differenceInCalendarDays(now, quarterStart) + 1;
+  const totalDays = differenceInCalendarDays(quarterEnd, quarterStart) + 1;
 
-  const handleOpenAdd = () => {
-    setEditingGoal({
-      id: '',
-      title: '',
-      description: '',
-      quarter: currentQuarter,
-      year: currentYear,
-      progress: 0,
-      isCompleted: false,
-    });
-    setIsDialogOpen(true);
+  const openDialog = (goal?: QuarterlyGoal) => {
+    setDraft(goal ? { ...goal } : createGoal());
+    setOpen(true);
   };
 
-  const handleSave = () => {
-    if (!editingGoal?.title) return;
-    if (editingGoal.id) {
-      updateGoal(editingGoal.id, editingGoal);
-    } else {
-      addGoal({
-        ...editingGoal,
-        id: crypto.randomUUID(),
-      } as QuarterlyGoal);
-    }
-    setIsDialogOpen(false);
+  const saveGoal = () => {
+    if (!draft.title.trim()) return;
+    if (draft.id) updateGoal(draft.id, draft);
+    else addGoal({ ...draft, id: crypto.randomUUID() });
+    setOpen(false);
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500">
-      {/* 季度时间进度卡片 */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="md:col-span-2 p-6 bg-white border border-slate-200 rounded-3xl shadow-sm relative overflow-hidden group">
-          <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-            <Hourglass size={120} />
-          </div>
-          <div className="relative z-10 space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-xl font-black text-slate-800 tracking-tight">Q{currentQuarter} Time Progress</h3>
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">{format(qStart, 'MMM d')} - {format(qEnd, 'MMM d, yyyy')}</p>
-              </div>
-              <div className="text-right">
-                <div className="text-3xl font-black text-slate-800">{progressPercent}%</div>
-                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Passed</div>
-              </div>
-            </div>
-            
-            <div className="space-y-2">
-              <div className="h-3 w-full bg-slate-100 rounded-full overflow-hidden border border-slate-100">
-                <div 
-                  className="h-full bg-slate-800 transition-all duration-1000 ease-out rounded-full" 
-                  style={{ width: `${progressPercent}%` }} 
-                />
-              </div>
-              <div className="flex justify-between text-xs font-bold text-slate-500">
-                <span>已过 {passedDays} 天</span>
-                <span className="text-primary">剩余 {remainingDays} 天</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="p-6 bg-primary/5 border border-primary/10 rounded-3xl flex flex-col justify-center items-center text-center space-y-3">
-          <Trophy size={32} className="text-primary" />
+    <div className="space-y-6">
+      <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <div className="text-3xl font-black text-slate-800">{currentGoals.filter(g => g.isCompleted).length} <span className="text-sm text-slate-400 font-bold">/ {currentGoals.length}</span></div>
-            <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mt-1">Goals Achieved</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">季度目标</p>
+            <h2 className="mt-2 text-3xl font-black tracking-tight text-slate-900">把季度目标落到周计划和任务</h2>
+            <p className="mt-2 text-sm text-slate-500">
+              当前季度已过去 {passedDays} / {totalDays} 天，建议只保留最关键的 3 到 5 个目标。
+            </p>
           </div>
+          <Button data-testid="quarterly-goals-new" className="rounded-2xl" onClick={() => openDialog()}>
+            <Plus size={16} className="mr-2" />
+            新建目标
+          </Button>
         </div>
-      </div>
+      </section>
 
-      <div className="flex items-center justify-between pt-4">
-        <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
-          <Target className="text-primary" size={20} /> 本季目标
-        </h3>
-        <Button size="sm" onClick={handleOpenAdd} className="gap-2 rounded-xl shadow-lg shadow-primary/20">
-          <Plus size={16} /> 新建目标
-        </Button>
-      </div>
-
-      <div className="grid gap-4">
-        {currentGoals.length === 0 ? (
-          <div className="text-center py-12 border-2 border-dashed border-slate-200 rounded-3xl">
-            <p className="text-sm font-bold text-slate-400">本季度还没有设定目标，从现在开始规划吧！</p>
+      <div className="grid gap-4 md:grid-cols-2">
+        {currentGoals.length === 0 && (
+          <div className="rounded-[28px] border border-dashed border-slate-200 bg-white p-10 text-center text-sm text-slate-400">
+            当前季度还没有目标，建议先定义几个可衡量的结果，再在周计划里承接。
           </div>
-        ) : (
-          currentGoals.map(goal => (
-            <div key={goal.id} className="group p-5 bg-white border border-slate-200 rounded-2xl shadow-sm transition-all hover:border-primary/30 hover:shadow-md flex items-center justify-between">
-              <div className="space-y-1">
-                <h4 className={cn("text-base font-bold", goal.isCompleted ? "text-slate-400 line-through" : "text-slate-800")}>{goal.title}</h4>
-                {goal.description && <p className="text-xs font-medium text-slate-500 line-clamp-1">{goal.description}</p>}
-              </div>
-              
-              <div className="flex items-center gap-4">
-                {/* 进度控制 */}
-                {!goal.isCompleted && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-black text-slate-400 w-8 text-right">{goal.progress}%</span>
-                    <input 
-                      type="range" 
-                      min="0" max="100" 
-                      value={goal.progress} 
-                      onChange={(e) => updateGoal(goal.id, { progress: Number(e.target.value) })}
-                      className="w-24 h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-primary"
-                    />
-                  </div>
-                )}
-
+        )}
+        {currentGoals.map((goal) => {
+          const relatedWeeklyGoals = weeklyPlans.flatMap((plan) => plan.goals).filter((item) => item.quarterlyGoalId === goal.id);
+          const relatedTasks = tasks.filter((task) => task.linkedGoalIds.includes(goal.id));
+          return (
+            <article key={goal.id} className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-black text-slate-900">{goal.title}</h3>
+                  <p className="mt-2 text-sm text-slate-500">{goal.description || '还没有补充目标说明。'}</p>
+                </div>
                 <div className="flex gap-2">
-                  <Button 
-                    variant={goal.isCompleted ? "secondary" : "outline"}
-                    size="sm"
-                    className={cn("rounded-xl font-bold h-9", goal.isCompleted ? "bg-green-100 text-green-700 hover:bg-green-200" : "border-slate-200")}
-                    onClick={() => updateGoal(goal.id, { isCompleted: !goal.isCompleted, progress: !goal.isCompleted ? 100 : goal.progress })}
-                  >
-                    {goal.isCompleted ? "已达成" : "标记完成"}
-                  </Button>
-                  <Button variant="ghost" size="icon" className="h-9 w-9 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => deleteGoal(goal.id)}>
+                  <Button variant="outline" className="rounded-2xl" onClick={() => openDialog(goal)}>编辑</Button>
+                  <Button variant="ghost" className="rounded-2xl text-rose-600 hover:bg-rose-50" onClick={() => deleteGoal(goal.id)}>
                     <Trash2 size={16} />
                   </Button>
                 </div>
               </div>
-            </div>
-          ))
-        )}
+              <div className="mt-5 rounded-2xl bg-slate-50 p-4">
+                <div className="flex items-center justify-between text-sm font-semibold text-slate-700">
+                  <span className="flex items-center gap-2"><BarChart3 size={14} /> 当前进度</span>
+                  <span>{goal.progress}%</span>
+                </div>
+                <div className="mt-3 h-2 rounded-full bg-slate-200">
+                  <div className="h-2 rounded-full bg-primary" style={{ width: `${goal.progress}%` }} />
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={goal.progress}
+                  onChange={(event) => updateGoal(goal.id, { progress: Number(event.target.value), isCompleted: Number(event.target.value) >= 100 })}
+                  className="mt-4 w-full accent-primary"
+                />
+              </div>
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl bg-slate-50 p-4">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                    <Link2 size={14} /> 关联周目标
+                  </div>
+                  <div className="mt-2 text-2xl font-black text-slate-900">{relatedWeeklyGoals.length}</div>
+                </div>
+                <div className="rounded-2xl bg-slate-50 p-4">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                    <Target size={14} /> 关联任务
+                  </div>
+                  <div className="mt-2 text-2xl font-black text-slate-900">{relatedTasks.length}</div>
+                </div>
+              </div>
+            </article>
+          );
+        })}
       </div>
 
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="sm:max-w-[425px] rounded-3xl border-slate-200 bg-white shadow-2xl">
-          <DialogHeader><DialogTitle className="text-xl font-black">设定季度目标</DialogTitle></DialogHeader>
-          <div className="grid gap-6 py-4">
-            <div className="space-y-2">
-              <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">目标名称</label>
-              <Input 
-                className="bg-slate-50 border-slate-200 rounded-xl h-11 font-bold" 
-                value={editingGoal?.title || ''} 
-                onChange={e => setEditingGoal(prev => ({ ...prev, title: e.target.value }))}
-                placeholder="例如：完成核心项目重构"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">详细描述</label>
-              <textarea 
-                className="flex min-h-[100px] w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium" 
-                value={editingGoal?.description || ''} 
-                onChange={e => setEditingGoal(prev => ({ ...prev, description: e.target.value }))}
-                placeholder="分解关键结果..."
-              />
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-h-[90vh] w-[min(92vw,560px)] max-w-[560px] overflow-hidden rounded-[28px] border-slate-200 bg-white p-0">
+          <DialogHeader className="px-6 pt-6">
+            <DialogTitle className="text-2xl font-black text-slate-900">{draft.id ? '编辑季度目标' : '新建季度目标'}</DialogTitle>
+          </DialogHeader>
+          <div className="grid max-h-[calc(90vh-132px)] gap-4 overflow-y-auto px-6 py-2">
+            <Input
+              data-testid="quarterly-goal-title"
+              value={draft.title}
+              onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}
+              className="h-12 rounded-2xl border-slate-200 bg-slate-50"
+              placeholder="目标标题"
+            />
+            <textarea
+              value={draft.description || ''}
+              onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))}
+              className="min-h-[120px] rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm outline-none"
+              placeholder="完成这个目标的关键结果、验收方式和边界"
+            />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">季度</div>
+                <Input type="number" value={draft.quarter} onChange={(event) => setDraft((current) => ({ ...current, quarter: Number(event.target.value) }))} className="rounded-2xl border-slate-200 bg-slate-50" />
+              </div>
+              <div>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">年份</div>
+                <Input type="number" value={draft.year} onChange={(event) => setDraft((current) => ({ ...current, year: Number(event.target.value) }))} className="rounded-2xl border-slate-200 bg-slate-50" />
+              </div>
             </div>
           </div>
-          <DialogFooter><Button onClick={handleSave} className="w-full h-12 rounded-xl font-black shadow-lg shadow-primary/10">确认目标</Button></DialogFooter>
+          <DialogFooter className="px-6 pb-6">
+            <Button data-testid="quarterly-goal-save" className="rounded-2xl" onClick={saveGoal}>保存目标</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

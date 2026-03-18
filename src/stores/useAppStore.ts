@@ -1,222 +1,385 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
-import { Task, Group, QuarterlyGoal, WeeklyPlan, PomodoroSettings, PomodoroHistory, AISettings, ChatMessage, Habit, Deadline } from '../types';
+import { createJSONStorage, persist } from 'zustand/middleware';
+import {
+  AISettings,
+  ChatMessage,
+  Habit,
+  LegacyData,
+  PlannerList,
+  PomodoroHistory,
+  PomodoroSettings,
+  QuarterlyGoal,
+  Task,
+  WeeklyGoal,
+  WeeklyPlan,
+  WeeklyReport,
+} from '../types/index.js';
+import {
+  defaultAISettings,
+  defaultLists,
+  defaultPomodoroSettings,
+  migrateStore,
+  nowIso,
+  PersistedAppState,
+  STORE_VERSION,
+} from './migrations.js';
 
-interface AppState {
+type AppStoreState = {
+  schemaVersion: number;
   tasks: Task[];
-  deadlines: Deadline[];
-  groups: Group[];
+  lists: PlannerList[];
   goals: QuarterlyGoal[];
   weeklyPlans: WeeklyPlan[];
-  habits: Habit[]; 
+  weeklyReports: WeeklyReport[];
+  habits: Habit[];
   pomodoroSettings: PomodoroSettings;
   pomodoroHistory: PomodoroHistory;
   aiSettings: AISettings;
   chatHistory: ChatMessage[];
+  legacyData: LegacyData;
   isSettingsOpen: boolean;
-  isPomodoroMiniPlayer: boolean;
+  currentTaskId: string | null;
+  selectedTaskId: string | null;
+  isAIPanelOpen: boolean;
   _hasHydrated: boolean;
-  
-  setIsSettingsOpen: (isOpen: boolean) => void;
-  setIsPomodoroMiniPlayer: (isMini: boolean) => void;
   setHasHydrated: (state: boolean) => void;
-  importData: (data: Partial<AppState>) => void; 
-
+  setIsSettingsOpen: (isOpen: boolean) => void;
+  setCurrentTaskId: (taskId: string | null) => void;
+  setSelectedTaskId: (taskId: string | null) => void;
+  setIsAIPanelOpen: (isOpen: boolean) => void;
+  importData: (data: Partial<AppStoreState>) => void;
   addTask: (task: Task) => void;
   updateTask: (id: string, updates: Partial<Task>) => void;
+  syncTaskRelations: (taskId: string, linkedGoalIds: string[], linkedWeeklyGoalIds: string[]) => void;
   deleteTask: (id: string) => void;
-
-  addDeadline: (deadline: Deadline) => void;
-  updateDeadline: (id: string, updates: Partial<Deadline>) => void;
-  deleteDeadline: (id: string) => void;
-  
-  addGroup: (group: Group) => void;
-  updateGroup: (id: string, updates: Partial<Group>) => void;
-  deleteGroup: (id: string) => void;
-  
+  addList: (list: PlannerList) => void;
+  updateList: (id: string, updates: Partial<PlannerList>) => void;
+  deleteList: (id: string) => void;
   addGoal: (goal: QuarterlyGoal) => void;
   updateGoal: (id: string, updates: Partial<QuarterlyGoal>) => void;
   deleteGoal: (id: string) => void;
-  
+  updateWeeklyPlan: (plan: WeeklyPlan) => void;
+  updateWeeklyGoal: (weekNumber: number, year: number, goalId: string, updates: Partial<WeeklyGoal>) => void;
+  addWeeklyReport: (report: WeeklyReport) => void;
+  updateWeeklyReport: (id: string, updates: Partial<WeeklyReport>) => void;
   addHabit: (habit: Habit) => void;
   updateHabit: (id: string, updates: Partial<Habit>) => void;
   deleteHabit: (id: string) => void;
   toggleHabitCompletion: (id: string, date: string) => void;
-  
-  updateWeeklyPlan: (plan: WeeklyPlan) => void;
-  toggleWeeklyGoal: (weekYearKey: string, goalId: string) => void;
   updatePomodoroSettings: (settings: Partial<PomodoroSettings>) => void;
-  logPomodoroSession: (date: string, minutes: number) => void;
+  logPomodoroSession: (date: string, minutes: number, taskId?: string, completed?: boolean) => void;
   clearPomodoroHistory: () => void;
   updateAISettings: (settings: Partial<AISettings>) => void;
-
-  addChatMessage: (message: ChatMessage) => void;
+  addChatMessage: (message: Omit<ChatMessage, 'id'> & { id?: string }) => void;
   clearChatHistory: () => void;
-}
+};
 
-export const useAppStore = create<AppState>()(
+const initialState: Omit<
+  AppStoreState,
+  | 'setHasHydrated'
+  | 'setIsSettingsOpen'
+  | 'setCurrentTaskId'
+  | 'setSelectedTaskId'
+  | 'setIsAIPanelOpen'
+  | 'importData'
+  | 'addTask'
+  | 'updateTask'
+  | 'syncTaskRelations'
+  | 'deleteTask'
+  | 'addList'
+  | 'updateList'
+  | 'deleteList'
+  | 'addGoal'
+  | 'updateGoal'
+  | 'deleteGoal'
+  | 'updateWeeklyPlan'
+  | 'updateWeeklyGoal'
+  | 'addWeeklyReport'
+  | 'updateWeeklyReport'
+  | 'addHabit'
+  | 'updateHabit'
+  | 'deleteHabit'
+  | 'toggleHabitCompletion'
+  | 'updatePomodoroSettings'
+  | 'logPomodoroSession'
+  | 'clearPomodoroHistory'
+  | 'updateAISettings'
+  | 'addChatMessage'
+  | 'clearChatHistory'
+> = {
+  schemaVersion: STORE_VERSION,
+  tasks: [],
+  lists: defaultLists,
+  goals: [],
+  weeklyPlans: [],
+  weeklyReports: [],
+  habits: [],
+  pomodoroSettings: defaultPomodoroSettings,
+  pomodoroHistory: {},
+  aiSettings: defaultAISettings,
+  chatHistory: [],
+  legacyData: {},
+  isSettingsOpen: false,
+  currentTaskId: null,
+  selectedTaskId: null,
+  isAIPanelOpen: true,
+  _hasHydrated: false,
+};
+
+const legacyStorageKeys = [
+  'daily-planner-storage-v6',
+  'daily-planner-storage-v5',
+  'daily-planner-storage',
+  'zustand',
+];
+
+const syncGoalWeeklyLinks = (goals: QuarterlyGoal[], weeklyPlans: WeeklyPlan[]) => {
+  const weeklyGoalMap = new Map<string, string[]>();
+
+  weeklyPlans.forEach((plan) => {
+    plan.goals.forEach((goal) => {
+      if (!goal.quarterlyGoalId) return;
+      const linked = weeklyGoalMap.get(goal.quarterlyGoalId) || [];
+      weeklyGoalMap.set(goal.quarterlyGoalId, [...linked, goal.id]);
+    });
+  });
+
+  return goals.map((goal) => ({
+    ...goal,
+    weeklyGoalIds: Array.from(new Set(weeklyGoalMap.get(goal.id) || [])),
+  }));
+};
+
+const persistedStorage = createJSONStorage<PersistedAppState>(() => ({
+  getItem: (name) => {
+    if (typeof localStorage === 'undefined') return null;
+    const current = localStorage.getItem(name);
+    if (current) return current;
+
+    for (const key of legacyStorageKeys) {
+      const value = localStorage.getItem(key);
+      if (value) return value;
+    }
+
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith('daily-planner-storage')) {
+        const value = localStorage.getItem(key);
+        if (value) return value;
+      }
+    }
+
+    return null;
+  },
+  setItem: (name, value) => {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(name, value);
+  },
+  removeItem: (name) => {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.removeItem(name);
+  },
+}));
+
+export const useAppStore = create<AppStoreState>()(
   persist(
     (set) => ({
-      tasks: [],
-      deadlines: [],
-      groups: [
-        { id: 'work', name: '工作', color: '#3b82f6' },
-        { id: 'life', name: '生活', color: '#10b981' },
-      ],
-      goals: [],
-      weeklyPlans: [],
-      habits: [],
-      pomodoroSettings: {
-        workDuration: 25,
-        shortBreakDuration: 5,
-        longBreakDuration: 15,
-        longBreakInterval: 4,
-        autoStartBreaks: true,
-        autoStartPomodoros: false,
-        maxSessions: 8,
-        stopAfterSessions: 0,
-        stopAfterLongBreak: false,
-      },
-      pomodoroHistory: {},
-      aiSettings: {
-        baseUrl: 'https://api.openai.com/v1',
-        apiKey: '',
-        model: 'gpt-3.5-turbo',
-      },
-      chatHistory: [
-        { role: 'assistant', content: '你好！我是你的 AI 任务助手。我已经准备好为您服务了。', timestamp: Date.now() }
-      ],
-      isSettingsOpen: false,
-      isPomodoroMiniPlayer: false,
-      _hasHydrated: false,
-
-      setIsSettingsOpen: (isOpen) => set({ isSettingsOpen: isOpen }),
-      setIsPomodoroMiniPlayer: (isMini) => set({ isPomodoroMiniPlayer: isMini }),
+      ...initialState,
       setHasHydrated: (state) => set({ _hasHydrated: state }),
-      
+      setIsSettingsOpen: (isOpen) => set({ isSettingsOpen: isOpen }),
+      setCurrentTaskId: (taskId) => set({ currentTaskId: taskId }),
+      setSelectedTaskId: (taskId) => set({ selectedTaskId: taskId }),
+      setIsAIPanelOpen: (isOpen) => set({ isAIPanelOpen: isOpen }),
       importData: (data) => set((state) => ({
-        tasks: data.tasks || state.tasks,
-        deadlines: data.deadlines || state.deadlines,
-        groups: data.groups || state.groups,
-        goals: data.goals || state.goals,
-        weeklyPlans: data.weeklyPlans || state.weeklyPlans,
-        habits: data.habits || state.habits,
-        pomodoroSettings: data.pomodoroSettings || state.pomodoroSettings,
-        pomodoroHistory: data.pomodoroHistory || state.pomodoroHistory,
-        aiSettings: data.aiSettings || state.aiSettings,
+        ...state,
+        ...migrateStore(data),
       })),
-
       addTask: (task) => set((state) => ({ tasks: [...state.tasks, task] })),
       updateTask: (id, updates) => set((state) => ({
-        tasks: state.tasks.map((t) => {
-          if (t.id !== id) return t;
-          const updatedAt = typeof updates.updatedAt === 'string' ? updates.updatedAt : new Date().toISOString();
-          return { ...t, ...updates, updatedAt };
-        })
+        tasks: state.tasks.map((task) => task.id === id
+          ? { ...task, ...updates, updatedAt: nowIso() }
+          : task),
       })),
-      deleteTask: (id) => set((state) => ({ tasks: state.tasks.filter((t) => t.id !== id) })),
-
-      addDeadline: (deadline) => set((state) => ({ deadlines: [...state.deadlines, deadline] })),
-      updateDeadline: (id, updates) => set((state) => ({
-        deadlines: state.deadlines.map((d) => (d.id === id ? { ...d, ...updates } : d))
+      syncTaskRelations: (taskId, linkedGoalIds, linkedWeeklyGoalIds) => set((state) => ({
+        goals: state.goals.map((goal) => ({
+          ...goal,
+          taskIds: linkedGoalIds.includes(goal.id)
+            ? Array.from(new Set([...goal.taskIds, taskId]))
+            : goal.taskIds.filter((id) => id !== taskId),
+        })),
+        weeklyPlans: state.weeklyPlans.map((plan) => ({
+          ...plan,
+          goals: plan.goals.map((goal) => ({
+            ...goal,
+            taskIds: linkedWeeklyGoalIds.includes(goal.id)
+              ? Array.from(new Set([...goal.taskIds, taskId]))
+              : goal.taskIds.filter((id) => id !== taskId),
+          })),
+        })),
       })),
-      deleteDeadline: (id) => set((state) => ({ deadlines: state.deadlines.filter((d) => d.id !== id) })),
-      
-      addGroup: (group) => set((state) => ({ groups: [...state.groups, group] })),
-      updateGroup: (id, updates) => set((state) => ({
-        groups: state.groups.map(g => g.id === id ? { ...g, ...updates } : g)
+      deleteTask: (id) => set((state) => ({
+        tasks: state.tasks.filter((task) => task.id !== id),
+        selectedTaskId: state.selectedTaskId === id ? null : state.selectedTaskId,
+        currentTaskId: state.currentTaskId === id ? null : state.currentTaskId,
+        weeklyPlans: state.weeklyPlans.map((plan) => ({
+          ...plan,
+          goals: plan.goals.map((goal) => ({
+            ...goal,
+            taskIds: goal.taskIds.filter((taskId) => taskId !== id),
+          })),
+        })),
+        goals: state.goals.map((goal) => ({
+          ...goal,
+          taskIds: goal.taskIds.filter((taskId) => taskId !== id),
+        })),
       })),
-      deleteGroup: (id) => set((state) => ({ 
-        groups: state.groups.filter(g => g.id !== id),
-        tasks: state.tasks.map(t => t.groupId === id ? { ...t, groupId: 'work' } : t)
+      addList: (list) => set((state) => ({ lists: [...state.lists, list] })),
+      updateList: (id, updates) => set((state) => ({
+        lists: state.lists.map((list) => list.id === id ? { ...list, ...updates } : list),
       })),
-
+      deleteList: (id) => set((state) => ({
+        lists: state.lists.filter((list) => list.id !== id),
+        tasks: state.tasks.map((task) => task.listId === id ? { ...task, listId: 'inbox' } : task),
+      })),
       addGoal: (goal) => set((state) => ({ goals: [...state.goals, goal] })),
       updateGoal: (id, updates) => set((state) => ({
-        goals: state.goals.map((g) => (g.id === id ? { ...g, ...updates } : g))
+        goals: state.goals.map((goal) => goal.id === id ? { ...goal, ...updates } : goal),
       })),
-      deleteGoal: (id) => set((state) => ({ goals: state.goals.filter((g) => g.id !== id) })),
-
-      addHabit: (habit) => set((state) => ({ habits: [...state.habits, habit] })),
-      updateHabit: (id, updates) => set((state) => ({
-        habits: state.habits.map((h) => (h.id === id ? { ...h, ...updates } : h))
+      deleteGoal: (id) => set((state) => ({
+        goals: state.goals.filter((goal) => goal.id !== id),
+        tasks: state.tasks.map((task) => ({
+          ...task,
+          linkedGoalIds: task.linkedGoalIds.filter((goalId) => goalId !== id),
+        })),
+        weeklyPlans: state.weeklyPlans.map((plan) => ({
+          ...plan,
+          goals: plan.goals.map((goal) => goal.quarterlyGoalId === id ? { ...goal, quarterlyGoalId: undefined } : goal),
+        })),
       })),
-      deleteHabit: (id) => set((state) => ({ habits: state.habits.filter((h) => h.id !== id) })),
-      toggleHabitCompletion: (id, date) => set((state) => ({
-        habits: state.habits.map((h) => {
-          if (h.id !== id) return h;
-          const isCompleted = h.completedDates.includes(date);
-          return {
-            ...h,
-            completedDates: isCompleted 
-              ? h.completedDates.filter(d => d !== date)
-              : [...h.completedDates, date]
-          };
-        })
-      })),
-
       updateWeeklyPlan: (plan) => set((state) => {
-        const index = state.weeklyPlans.findIndex(p => p.weekNumber === plan.weekNumber && p.year === plan.year);
-        if (index >= 0) {
-          const newPlans = [...state.weeklyPlans];
-          newPlans[index] = plan;
-          return { weeklyPlans: newPlans };
+        const index = state.weeklyPlans.findIndex((item) => item.weekNumber === plan.weekNumber && item.year === plan.year);
+        if (index === -1) {
+          const weeklyPlans = [...state.weeklyPlans, plan];
+          return {
+            weeklyPlans,
+            goals: syncGoalWeeklyLinks(state.goals, weeklyPlans),
+          };
         }
-        return { weeklyPlans: [...state.weeklyPlans, plan] };
-      }),
-      toggleWeeklyGoal: (weekYearKey, goalId) => set((state) => {
-        const [week, year] = weekYearKey.split('-').map(Number);
+        const weeklyPlans = [...state.weeklyPlans];
+        weeklyPlans[index] = plan;
         return {
-          weeklyPlans: state.weeklyPlans.map(p => {
-            if (p.weekNumber === week && p.year === year) {
-              return {
-                ...p,
-                goals: p.goals.map(g => {
-                  if (g.id !== goalId) return g;
-                  const nextCompleted = !g.isCompleted;
-                  return {
-                    ...g,
-                    isCompleted: nextCompleted,
-                    incompleteReason: nextCompleted ? undefined : g.incompleteReason,
-                  };
-                })
-              };
-            }
-            return p;
-          })
+          weeklyPlans,
+          goals: syncGoalWeeklyLinks(state.goals, weeklyPlans),
         };
       }),
-      updatePomodoroSettings: (settings) => set((state) => ({
-        pomodoroSettings: { ...state.pomodoroSettings, ...settings }
+      updateWeeklyGoal: (weekNumber, year, goalId, updates) => set((state) => ({
+        weeklyPlans: state.weeklyPlans.map((plan) => {
+          if (plan.weekNumber !== weekNumber || plan.year !== year) return plan;
+          return {
+            ...plan,
+            goals: plan.goals.map((goal) => goal.id === goalId ? { ...goal, ...updates } : goal),
+          };
+        }),
+        goals: syncGoalWeeklyLinks(state.goals, state.weeklyPlans.map((plan) => {
+          if (plan.weekNumber !== weekNumber || plan.year !== year) return plan;
+          return {
+            ...plan,
+            goals: plan.goals.map((goal) => goal.id === goalId ? { ...goal, ...updates } : goal),
+          };
+        })),
       })),
-      logPomodoroSession: (date, minutes) => set((state) => {
+      addWeeklyReport: (report) => set((state) => ({ weeklyReports: [...state.weeklyReports, report] })),
+      updateWeeklyReport: (id, updates) => set((state) => ({
+        weeklyReports: state.weeklyReports.map((report) => report.id === id ? { ...report, ...updates, updatedAt: nowIso() } : report),
+      })),
+      addHabit: (habit) => set((state) => ({ habits: [...state.habits, habit] })),
+      updateHabit: (id, updates) => set((state) => ({
+        habits: state.habits.map((habit) => habit.id === id ? { ...habit, ...updates } : habit),
+      })),
+      deleteHabit: (id) => set((state) => ({
+        habits: state.habits.filter((habit) => habit.id !== id),
+      })),
+      toggleHabitCompletion: (id, date) => set((state) => ({
+        habits: state.habits.map((habit) => {
+          if (habit.id !== id) return habit;
+          const completed = habit.completedDates.includes(date);
+          return {
+            ...habit,
+            completedDates: completed
+              ? habit.completedDates.filter((item) => item !== date)
+              : [...habit.completedDates, date],
+          };
+        }),
+      })),
+      updatePomodoroSettings: (settings) => set((state) => ({
+        pomodoroSettings: { ...state.pomodoroSettings, ...settings },
+      })),
+      logPomodoroSession: (date, minutes, taskId, completed) => set((state) => {
         if (minutes <= 0) return state;
-        const now = Date.now();
         const prev = state.pomodoroHistory[date] || { minutes: 0, sessions: 0, entries: [] };
-        const prevEntries = prev.entries || [];
+        const entries = prev.entries || [];
         return {
           pomodoroHistory: {
             ...state.pomodoroHistory,
             [date]: {
-              minutes: (prev.minutes || 0) + minutes,
-              sessions: (prev.sessions || 0) + 1,
-              entries: [...prevEntries, { ts: now, minutes }],
+              minutes: prev.minutes + minutes,
+              sessions: prev.sessions + (completed === false ? 0 : 1),
+              entries: [...entries, { ts: Date.now(), minutes, taskId, completed }],
             },
           },
+          tasks: taskId
+            ? state.tasks.map((task) => task.id === taskId
+              ? {
+                  ...task,
+                  pomodoroMinutes: task.pomodoroMinutes + minutes,
+                  pomodoroSessions: task.pomodoroSessions + (completed === false ? 0 : 1),
+                  updatedAt: nowIso(),
+                }
+              : task)
+            : state.tasks,
         };
       }),
       clearPomodoroHistory: () => set({ pomodoroHistory: {} }),
       updateAISettings: (settings) => set((state) => ({
-        aiSettings: { ...state.aiSettings, ...settings }
+        aiSettings: { ...state.aiSettings, ...settings },
       })),
-      addChatMessage: (message) => set((state) => ({ chatHistory: [...state.chatHistory, message] })),
+      addChatMessage: (message) => set((state) => ({
+        chatHistory: [
+          ...state.chatHistory,
+          {
+            id: message.id || crypto.randomUUID(),
+            role: message.role,
+            content: message.content,
+            timestamp: message.timestamp,
+            actionPreview: message.actionPreview,
+          },
+        ],
+      })),
       clearChatHistory: () => set({ chatHistory: [] }),
     }),
     {
-      name: 'daily-planner-storage-v5',
+      name: 'daily-planner-storage-v7',
+      version: STORE_VERSION,
+      storage: persistedStorage,
+      migrate: (persistedState) => migrateStore(persistedState),
       onRehydrateStorage: () => (state) => {
         state?.setHasHydrated(true);
       },
-    }
-  )
+      partialize: (state): PersistedAppState => ({
+        schemaVersion: state.schemaVersion,
+        tasks: state.tasks,
+        lists: state.lists,
+        goals: state.goals,
+        weeklyPlans: state.weeklyPlans,
+        weeklyReports: state.weeklyReports,
+        habits: state.habits,
+        pomodoroSettings: state.pomodoroSettings,
+        pomodoroHistory: state.pomodoroHistory,
+        aiSettings: state.aiSettings,
+        currentTaskId: state.currentTaskId,
+        chatHistory: state.chatHistory,
+        legacyData: state.legacyData,
+        isAIPanelOpen: state.isAIPanelOpen,
+      }),
+    },
+  ),
 );

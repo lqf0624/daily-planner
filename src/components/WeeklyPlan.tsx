@@ -1,105 +1,235 @@
-import React, { useState } from 'react';
-import { Plus, CheckCircle2, Circle, Trash2, Edit2, LayoutList, ClipboardList, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { addWeeks, endOfISOWeek, format, getISOWeek, getISOWeekYear, getQuarter, startOfISOWeek, subWeeks } from 'date-fns';
+import { CheckCircle2, ChevronLeft, ChevronRight, Plus, Target } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
-import { getISOWeek, getISOWeekYear, format, startOfISOWeek, endOfISOWeek, addWeeks, subWeeks } from 'date-fns';
+import { WeeklyGoal, WeeklyPlan as WeeklyPlanType } from '../types';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
-import { cn } from '../utils/cn';
-import { WeeklyGoal } from '../types';
 
-const WeeklyPlanView: React.FC = () => {
-  const { weeklyPlans, updateWeeklyPlan } = useAppStore();
-  const [displayDate, setDisplayDate] = useState(new Date());
-  const [newGoalText, setNewGroupName] = useState('');
-  const [editingGoalId, setEditingGoalId] = useState<string | null>(null);
-  const [editValue, setEditValue] = useState('');
+const createWeeklyGoal = (): WeeklyGoal => ({
+  id: crypto.randomUUID(),
+  text: '',
+  isCompleted: false,
+  taskIds: [],
+  priority: 'medium',
+});
 
-  const now = new Date();
-  const currentWeek = getISOWeek(displayDate);
-  const currentYear = getISOWeekYear(displayDate);
-  const weekStart = startOfISOWeek(displayDate);
-  const weekEnd = endOfISOWeek(displayDate);
+const WeeklyPlan = () => {
+  const { weeklyPlans, goals, tasks, updateWeeklyPlan } = useAppStore();
+  const [cursor, setCursor] = useState(new Date());
+  const [draftText, setDraftText] = useState('');
 
-  const realWeek = getISOWeek(now);
-  const realYear = getISOWeekYear(now);
+  const weekNumber = getISOWeek(cursor);
+  const year = getISOWeekYear(cursor);
+  const quarter = getQuarter(cursor);
+  const weekStart = startOfISOWeek(cursor);
+  const weekEnd = endOfISOWeek(cursor);
 
-  const currentPlan = weeklyPlans.find(p => p.weekNumber === currentWeek && p.year === currentYear) || {
+  const plan = useMemo<WeeklyPlanType>(() => weeklyPlans.find((item) => item.weekNumber === weekNumber && item.year === year) || {
     id: crypto.randomUUID(),
-    weekNumber: currentWeek,
-    year: currentYear,
-    goals: []
+    weekNumber,
+    year,
+    goals: [],
+    notes: '',
+    focusAreas: [],
+    riskNotes: '',
+  }, [weekNumber, weeklyPlans, year]);
+
+  const goalOptions = useMemo(() => goals
+    .filter((goal) => (
+      (!goal.isCompleted || plan.goals.some((item) => item.quarterlyGoalId === goal.id))
+      && (goal.year === year && goal.quarter === quarter || plan.goals.some((item) => item.quarterlyGoalId === goal.id))
+    ))
+    .sort((a, b) => Number(a.isCompleted) - Number(b.isCompleted)), [goals, plan.goals, quarter, year]);
+
+  const savePlan = (updates: Partial<WeeklyPlanType>) => {
+    updateWeeklyPlan({ ...plan, ...updates });
   };
 
-  const handlePrevWeek = () => setDisplayDate(subWeeks(displayDate, 1));
-  const handleNextWeek = () => {
-    if (currentYear > realYear || (currentYear === realYear && currentWeek >= realWeek)) return;
-    setDisplayDate(addWeeks(displayDate, 1));
-  };
-
-  const handleAddGoal = () => {
-    if (!newGoalText.trim()) return;
-    updateWeeklyPlan({ ...currentPlan, goals: [...currentPlan.goals, { id: crypto.randomUUID(), text: newGoalText, isCompleted: false }] });
-    setNewGroupName('');
-  };
-
-  const handleStartEdit = (goal: WeeklyGoal) => {
-    setEditingGoalId(goal.id);
-    setEditValue(goal.text);
-  };
-
-  const handleSaveEdit = () => {
-    if (!editingGoalId) return;
-    updateWeeklyPlan({
-      ...currentPlan,
-      goals: currentPlan.goals.map(g => g.id === editingGoalId ? { ...g, text: editValue } : g)
+  const addGoal = () => {
+    if (!draftText.trim()) return;
+    savePlan({
+      goals: [...plan.goals, { ...createWeeklyGoal(), text: draftText.trim() }],
     });
-    setEditingGoalId(null);
+    setDraftText('');
   };
-
-  const toggleGoal = (goalId: string) => {
-    updateWeeklyPlan({
-      ...currentPlan,
-      goals: currentPlan.goals.map(g => g.id === goalId ? { ...g, isCompleted: !g.isCompleted } : g)
-    });
-  };
-
-  const isNextDisabled = currentYear > realYear || (currentYear === realYear && currentWeek >= realWeek);
 
   return (
-    <div className="h-full flex flex-col space-y-6 animate-in fade-in duration-500">
-      <div className="flex items-center justify-between no-drag px-1">
-        <div className="space-y-1">
-          <h3 className="text-xl font-black text-slate-800 tracking-tight flex items-center gap-2"><LayoutList className="text-primary" size={24} /> 周期回顾</h3>
-          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{currentYear} · 第 {currentWeek} 周 · {format(weekStart, 'MM/dd')} - {format(weekEnd, 'MM/dd')}</p>
-        </div>
-        <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl border border-slate-200">
-          <Button variant="ghost" size="icon" onClick={handlePrevWeek} className="h-8 w-8 rounded-lg hover:bg-white"><ChevronLeft size={16} /></Button>
-          <button onClick={() => setDisplayDate(now)} className="px-3 text-[10px] font-black uppercase text-slate-500 hover:text-primary transition-colors">THIS WEEK</button>
-          <Button variant="ghost" size="icon" onClick={handleNextWeek} disabled={isNextDisabled} className="h-8 w-8 rounded-lg hover:bg-white disabled:opacity-20"><ChevronRight size={16} /></Button>
-        </div>
+    <div className="grid h-full gap-6 xl:grid-cols-[minmax(0,1.35fr)_340px]">
+      <div className="space-y-6">
+        <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">周计划</p>
+              <h2 className="mt-2 text-3xl font-black tracking-tight text-slate-900">
+                第 {weekNumber} 周 · {format(weekStart, 'M月d日')} - {format(weekEnd, 'M月d日')}
+              </h2>
+              <p className="mt-2 text-sm text-slate-500">把季度目标翻译成这周必须推进的结果，再为结果挑选具体任务。</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" className="rounded-2xl" onClick={() => setCursor(subWeeks(cursor, 1))}>
+                <ChevronLeft size={16} />
+              </Button>
+              <Button variant="outline" className="rounded-2xl" onClick={() => setCursor(new Date())}>回到本周</Button>
+              <Button variant="outline" className="rounded-2xl" onClick={() => setCursor(addWeeks(cursor, 1))}>
+                <ChevronRight size={16} />
+              </Button>
+            </div>
+          </div>
+          <div className="mt-5 flex gap-3">
+            <Input
+              value={draftText}
+              data-testid="weekly-plan-goal-input"
+              onChange={(event) => setDraftText(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') addGoal();
+              }}
+              className="h-12 rounded-2xl border-slate-200 bg-slate-50"
+              placeholder="添加一个本周目标，例如：完成首页重构并过一轮自测"
+            />
+            <Button data-testid="weekly-plan-add-goal" className="h-12 rounded-2xl px-5" onClick={addGoal}>
+              <Plus size={16} className="mr-2" />
+              添加
+            </Button>
+          </div>
+        </section>
+
+        <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="mb-4 flex items-center gap-2 text-lg font-black text-slate-900">
+            <Target size={18} className="text-primary" />
+            本周目标
+          </div>
+          <div className="space-y-4">
+            {plan.goals.length === 0 && (
+              <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-400">
+                先列出本周目标，再把季度目标和具体任务关联进来。
+              </div>
+            )}
+            {plan.goals.map((goal) => (
+              <div key={goal.id} className="rounded-[24px] border border-slate-200 bg-slate-50/70 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        data-testid={`weekly-goal-complete-${goal.id}`}
+                        onClick={() => savePlan({
+                          goals: plan.goals.map((item) => item.id === goal.id ? {
+                            ...item,
+                            isCompleted: !item.isCompleted,
+                            incompleteReason: item.isCompleted ? item.incompleteReason : undefined,
+                          } : item),
+                        })}
+                        className={`rounded-full p-1 transition ${goal.isCompleted ? 'text-primary' : 'text-slate-400 hover:text-primary'}`}
+                      >
+                        <CheckCircle2 size={20} className={goal.isCompleted ? 'fill-primary text-primary' : ''} />
+                      </button>
+                      <Input
+                        value={goal.text}
+                        onChange={(event) => savePlan({
+                          goals: plan.goals.map((item) => item.id === goal.id ? { ...item, text: event.target.value } : item),
+                        })}
+                        className="h-11 rounded-2xl border-slate-200 bg-white"
+                      />
+                    </div>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <select
+                        value={goal.priority}
+                        onChange={(event) => savePlan({
+                          goals: plan.goals.map((item) => item.id === goal.id ? { ...item, priority: event.target.value as WeeklyGoal['priority'] } : item),
+                        })}
+                        className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none"
+                      >
+                        <option value="high">高优先级</option>
+                        <option value="medium">中优先级</option>
+                        <option value="low">低优先级</option>
+                      </select>
+                      <select
+                        value={goal.quarterlyGoalId || ''}
+                        onChange={(event) => savePlan({
+                          goals: plan.goals.map((item) => item.id === goal.id ? { ...item, quarterlyGoalId: event.target.value || undefined } : item),
+                        })}
+                        data-testid={`weekly-goal-quarterly-select-${goal.id}`}
+                        className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none"
+                      >
+                        <option value="">不关联季度目标</option>
+                        {goalOptions.map((option) => (
+                          <option key={option.id} value={option.id}>
+                            {option.title}{option.isCompleted ? '（已完成）' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="mt-3">
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">关联任务</div>
+                      <div className="flex flex-wrap gap-2">
+                        {tasks.filter((task) => task.status === 'todo').slice(0, 12).map((task) => {
+                          const active = goal.taskIds.includes(task.id);
+                          return (
+                            <button
+                              key={task.id}
+                              type="button"
+                              onClick={() => savePlan({
+                                goals: plan.goals.map((item) => item.id === goal.id ? {
+                                  ...item,
+                                  taskIds: active ? item.taskIds.filter((taskId) => taskId !== task.id) : [...item.taskIds, task.id],
+                                } : item),
+                              })}
+                              className={`rounded-full px-3 py-2 text-xs transition ${active ? 'bg-primary text-white' : 'bg-white text-slate-600'}`}
+                            >
+                              {task.title}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    {!goal.isCompleted && (
+                      <div className="mt-3">
+                        <div className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">未完成原因</div>
+                        <textarea
+                          value={goal.incompleteReason || ''}
+                          onChange={(event) => savePlan({
+                            goals: plan.goals.map((item) => item.id === goal.id ? { ...item, incompleteReason: event.target.value } : item),
+                          })}
+                          className="min-h-[88px] w-full rounded-2xl border border-slate-200 bg-white p-3 text-sm outline-none"
+                          placeholder="如果本周没有完成，这里记录原因或下周怎么调整"
+                        />
+                      </div>
+                    )}
+                  </div>
+                  <Button
+                    variant="ghost"
+                    className="rounded-2xl text-rose-600 hover:bg-rose-50"
+                    onClick={() => savePlan({ goals: plan.goals.filter((item) => item.id !== goal.id) })}
+                  >
+                    删除
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-[32px] p-8 flex-1 flex flex-col space-y-6 no-drag shadow-sm">
-        <div className="flex gap-3">
-          <Input placeholder="设定本周目标..." value={newGoalText} onChange={e => setNewGroupName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddGoal()} className="h-12 rounded-2xl bg-slate-50 border-slate-100 font-bold" />
-          <Button onClick={handleAddGoal} className="h-12 w-12 rounded-2xl p-0 shadow-lg shadow-primary/10"><Plus size={24} /></Button>
-        </div>
-        <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
-          {currentPlan.goals.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-slate-300 space-y-3 opacity-40"><ClipboardList size={48} /><p className="text-xs font-black uppercase tracking-tighter">暂无目标记录</p></div>
-          ) : (
-            currentPlan.goals.map((goal) => (
-              <div key={goal.id} className={cn("group flex items-center gap-4 p-4 rounded-2xl border transition-all duration-300", goal.isCompleted ? "bg-primary/5 border-primary/10" : "bg-slate-50 border-slate-100 hover:border-slate-300")}>
-                <button onClick={() => toggleGoal(goal.id)} className="shrink-0 transition-transform active:scale-90">{goal.isCompleted ? <CheckCircle2 className="text-primary" size={22} /> : <Circle className="text-slate-300" size={22} />}</button>
-                {editingGoalId === goal.id ? (<div className="flex-1 flex gap-2"><Input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSaveEdit()} className="h-8 py-0 px-2 font-bold" /><Button size="sm" onClick={handleSaveEdit} className="h-8 px-3">保存</Button></div>) : (<span className={cn("flex-1 text-sm font-bold tracking-tight transition-all", goal.isCompleted ? "text-slate-400 line-through" : "text-slate-700")}>{goal.text}</span>)}
-                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"><Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-slate-400" onClick={() => handleStartEdit(goal)}><Edit2 size={14} /></Button><Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-red-300 hover:text-red-500" onClick={() => updateWeeklyPlan({...currentPlan, goals: currentPlan.goals.filter(g => g.id !== goal.id)})}> <Trash2 size={14} /></Button></div>
+      <aside className="space-y-6">
+        <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="text-sm font-black text-slate-900">可关联季度目标</div>
+          <div className="mt-3 space-y-2">
+            {goalOptions.length ? goalOptions.map((goal) => (
+                <div key={goal.id} className="rounded-2xl bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                <div className="font-medium text-slate-800">{goal.title}</div>
+                <div className="mt-1 text-xs text-slate-500">{goal.weeklyGoalIds.length} 个周目标已关联</div>
               </div>
-            ))
-          )}
-        </div>
-      </div>
+            )) : (
+              <div className="rounded-2xl bg-slate-50 px-3 py-2 text-sm text-slate-500">
+                当前季度还没有可关联目标。先去季度目标页创建，或检查目标的季度/年份是否正确。
+              </div>
+            )}
+          </div>
+        </section>
+      </aside>
     </div>
   );
 };
 
-export default WeeklyPlanView;
+export default WeeklyPlan;

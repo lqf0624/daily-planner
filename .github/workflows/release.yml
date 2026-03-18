@@ -60,7 +60,7 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: "Daily Planner AI ${{ github.ref_name }}"
           releaseBody: "See the assets below for the installers and latest.json."
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
           includeRelease: true

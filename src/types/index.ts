@@ -1,34 +1,94 @@
+export type TaskStatus = 'todo' | 'done' | 'archived';
+
+export type TaskPriority = 'low' | 'medium' | 'high';
+
 export type RecurrenceFrequency = 'none' | 'daily' | 'weekly' | 'monthly';
+
+export interface TaskRecurrence {
+  frequency: RecurrenceFrequency;
+  smartWorkdayOnly: boolean;
+  endDate?: string;
+}
+
+export interface TaskReminder {
+  enabled: boolean;
+  minutesBefore: number;
+}
 
 export interface Task {
   id: string;
   title: string;
-  description?: string;
-  date: string;
-  startTime?: string;
-  endTime?: string;
-  hasTime: boolean;
-  isCompleted: boolean;
-  groupId: string;
+  notes?: string;
+  status: TaskStatus;
+  scheduledStart?: string;
+  scheduledEnd?: string;
+  dueAt?: string;
+  allDay: boolean;
+  priority: TaskPriority;
+  listId: string;
   tagIds: string[];
-  pomodoroCount: number;
+  reminder?: TaskReminder;
+  recurrence?: TaskRecurrence;
+  linkedGoalIds: string[];
+  linkedWeeklyGoalIds: string[];
+  pomodoroSessions: number;
+  pomodoroMinutes: number;
   createdAt: string;
   updatedAt: string;
-  recurrence?: {
-    frequency: RecurrenceFrequency;
-    smartWorkdayOnly: boolean;
-    endDate?: string;
-  };
-  isMultiDay?: boolean;
-  endDate?: string;
+  completedAt?: string;
 }
 
-export interface Deadline {
+export interface PlannerList {
+  id: string;
+  name: string;
+  color: string;
+}
+
+export interface QuarterlyGoal {
   id: string;
   title: string;
-  date: string;
-  priority: 'low' | 'medium' | 'high';
+  description?: string;
+  quarter: number;
+  year: number;
+  progress: number;
+  isCompleted: boolean;
+  weeklyGoalIds: string[];
+  taskIds: string[];
+}
+
+export interface WeeklyGoal {
+  id: string;
+  text: string;
+  isCompleted: boolean;
+  incompleteReason?: string;
+  quarterlyGoalId?: string;
+  taskIds: string[];
+  priority: TaskPriority;
+}
+
+export interface WeeklyPlan {
+  id: string;
+  weekNumber: number;
+  year: number;
+  goals: WeeklyGoal[];
+  notes?: string;
+  focusAreas?: string[];
+  riskNotes?: string;
+  reviewedAt?: string;
+  reviewNotes?: string;
+  nextWeekAdjustments?: string;
+}
+
+export interface WeeklyReport {
+  id: string;
+  weekNumber: number;
+  year: number;
+  summary: string;
+  wins: string;
+  blockers: string;
+  adjustments: string;
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface Habit {
@@ -43,39 +103,6 @@ export interface Habit {
   createdAt: string;
 }
 
-export interface Group {
-  id: string;
-  name: string;
-  color: string;
-}
-
-export interface QuarterlyGoal {
-  id: string;
-  title: string;
-  description?: string;
-  quarter: number; 
-  year: number;
-  progress: number; 
-  isCompleted: boolean;
-}
-
-export interface WeeklyGoal {
-  id: string;
-  text: string;
-  isCompleted: boolean;
-  incompleteReason?: string;
-}
-
-export interface WeeklyPlan {
-  id: string;
-  weekNumber: number;
-  year: number;
-  goals: WeeklyGoal[];
-  notes?: string;
-  reviewedAt?: string;
-  reviewNotes?: string;
-}
-
 export interface PomodoroSettings {
   workDuration: number;
   shortBreakDuration: number;
@@ -84,14 +111,16 @@ export interface PomodoroSettings {
   autoStartBreaks: boolean;
   autoStartPomodoros: boolean;
   maxSessions: number;
-  // 新增：自动停止逻辑
-  stopAfterSessions: number; // 0 表示不限制
+  stopAfterSessions: number;
   stopAfterLongBreak: boolean;
+  playSound: boolean;
 }
 
 export interface PomodoroSessionEntry {
   ts: number;
   minutes: number;
+  taskId?: string;
+  completed?: boolean;
 }
 
 export interface PomodoroDailyStats {
@@ -110,8 +139,24 @@ export interface AISettings {
   model: string;
 }
 
+export interface AIActionPreview {
+  type: 'create_task' | 'update_task' | 'create_weekly_plan' | 'draft_weekly_report';
+  payload: Record<string, unknown>;
+  summary: string;
+}
+
 export interface ChatMessage {
+  id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: number;
+  actionPreview?: AIActionPreview;
+}
+
+export interface LegacyData {
+  groups?: Array<{ id: string; name: string; color: string }>;
+  deadlines?: Array<Record<string, unknown>>;
+  goals?: Array<Record<string, unknown>>;
+  weeklyPlans?: Array<Record<string, unknown>>;
+  habits?: Array<Record<string, unknown>>;
 }

@@ -31,6 +31,7 @@ fi
 
 bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${info_plist}" 2>/dev/null || true)"
 icon_file="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "${info_plist}" 2>/dev/null || true)"
+icon_name="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "${info_plist}" 2>/dev/null || true)"
 
 if [[ -z "${icon_file}" ]]; then
   echo "CFBundleIconFile is missing in: ${info_plist}" >&2
@@ -52,4 +53,4 @@ echo "OK"
 echo "App: ${app_path}"
 echo "Bundle ID: ${bundle_id:-<unknown>}"
 echo "Icon: ${icon_path}"
-
+echo "Icon Name: ${icon_name:-<missing>}"

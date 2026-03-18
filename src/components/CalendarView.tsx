@@ -1,437 +1,512 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
-import timeGridPlugin from '@fullcalendar/timegrid';
-import listPlugin from '@fullcalendar/list';
 import interactionPlugin from '@fullcalendar/interaction';
-import type { EventApi } from '@fullcalendar/core';
+import type { EventResizeDoneArg } from '@fullcalendar/interaction';
+import listPlugin from '@fullcalendar/list';
+import timeGridPlugin from '@fullcalendar/timegrid';
+import { CalendarApi, DateSelectArg, DatesSetArg, EventClickArg, EventContentArg, EventDropArg, EventInput } from '@fullcalendar/core';
+import { ChevronLeft, ChevronRight, Filter, Flag, Plus, Search, Target } from 'lucide-react';
+import { format, getISOWeek, getISOWeekYear, parseISO } from 'date-fns';
 import { useAppStore } from '../stores/useAppStore';
-import { format, parseISO, isValid, isSameDay, addDays, differenceInDays } from 'date-fns';
-import { Task, Deadline, RecurrenceFrequency } from '../types';
+import { PlannerList, Task, TaskPriority, TaskStatus, WeeklyGoal } from '../types';
 import { Button } from './ui/button';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { Input } from './ui/input';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
-import { 
-  Plus, Trash2, Settings2, 
-  Repeat, AlertCircle, Edit3, CheckCircle2, Clock, Tag, Circle
-} from 'lucide-react';
-import { cn } from '../utils/cn';
 import './CalendarView.css';
 
-const CalendarView: React.FC = () => {
-  const { 
-    tasks, addTask, updateTask, deleteTask, 
-    groups, addGroup, updateGroup, deleteGroup,
-    deadlines, addDeadline, updateDeadline, deleteDeadline 
-  } = useAppStore();
-  
-  const [viewMode, setViewMode] = useState<'timeGridDay' | 'dayGridMonth' | 'listWeek'>('timeGridDay');
-  const calendarRef = useRef<FullCalendar>(null);
-  
-  const [isTaskDialogOpen, setIsTaskDialogOpen] = useState(false);
-  const [isGroupDialogOpen, setIsGroupDialogOpen] = useState(false);
-  const [isDeadlineDialogOpen, setIsDeadlineDialogOpen] = useState(false);
-  
-  const [editingTask, setEditingTask] = useState<Partial<Task> | null>(null);
-  const [editingDeadline, setEditingDeadline] = useState<Partial<Deadline> | null>(null);
-  
-  const [newGroupName, setNewGroupName] = useState('');
-  const [newGroupColor, setNewGroupColor] = useState('#0f766e');
+const priorityOptions: TaskPriority[] = ['high', 'medium', 'low'];
+const statusOptions: TaskStatus[] = ['todo', 'done'];
+const viewOptions = [
+  ['timeGridDay', '日视图'],
+  ['timeGridWeek', '周视图'],
+  ['dayGridMonth', '月视图'],
+  ['listWeek', '列表'],
+] as const;
 
-  const safeParseDate = (dateStr?: string) => {
-    if (!dateStr) return new Date();
-    const d = parseISO(dateStr);
-    return isValid(d) ? d : new Date();
+const priorityLabel: Record<TaskPriority, string> = {
+  high: '高优先级',
+  medium: '中优先级',
+  low: '低优先级',
+};
+
+const priorityClass: Record<TaskPriority, string> = {
+  high: 'border-l-rose-500',
+  medium: 'border-l-amber-500',
+  low: 'border-l-slate-400',
+};
+
+const statusLabel: Record<TaskStatus, string> = {
+  todo: '待办',
+  done: '已完成',
+  archived: '已归档',
+};
+
+type CalendarViewMode = typeof viewOptions[number][0];
+
+const toLocalDateTime = (date: Date) => format(date, "yyyy-MM-dd'T'HH:mm:ss");
+const toDateTimeInputValue = (value?: string) => (value ? format(parseISO(value), "yyyy-MM-dd'T'HH:mm") : '');
+const normalizeDateTimeInput = (value: string) => (value ? `${value}:00` : undefined);
+
+const createEmptyTask = (): Task => {
+  const now = new Date();
+  const date = format(now, 'yyyy-MM-dd');
+  const iso = now.toISOString();
+  return {
+    id: '',
+    title: '',
+    status: 'todo',
+    scheduledStart: `${date}T09:00:00`,
+    scheduledEnd: `${date}T10:00:00`,
+    dueAt: `${date}T10:00:00`,
+    allDay: false,
+    priority: 'medium',
+    listId: 'inbox',
+    tagIds: [],
+    linkedGoalIds: [],
+    linkedWeeklyGoalIds: [],
+    pomodoroSessions: 0,
+    pomodoroMinutes: 0,
+    createdAt: iso,
+    updatedAt: iso,
+  };
+};
+
+const CalendarView = () => {
+  const {
+    tasks,
+    lists,
+    goals,
+    weeklyPlans,
+    addTask,
+    updateTask,
+    deleteTask,
+    syncTaskRelations,
+  } = useAppStore();
+
+  const calendarRef = useRef<FullCalendar>(null);
+  const [viewMode, setViewMode] = useState<CalendarViewMode>('timeGridWeek');
+  const [calendarTitle, setCalendarTitle] = useState(() => format(new Date(), 'yyyy年M月'));
+  const [query, setQuery] = useState('');
+  const [listFilter, setListFilter] = useState<'all' | string>('all');
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [draft, setDraft] = useState<Task>(createEmptyTask());
+
+  const syncCalendarState = (calendar: CalendarApi) => {
+    setCalendarTitle(calendar.view.title);
   };
 
-  const events = useMemo(() => {
-    return tasks.map(task => {
-      const group = groups.find(g => g.id === task.groupId);
-      let endVal = undefined;
-      if (task.isMultiDay && task.endDate) {
-        endVal = format(addDays(parseISO(task.endDate), 1), 'yyyy-MM-dd');
-      } else if (task.hasTime && task.endTime) {
-        endVal = task.endTime;
-      }
-
-      return {
-        id: task.id,
-        title: task.title,
-        start: task.hasTime && task.startTime ? task.startTime : task.date,
-        end: endVal,
-        allDay: !task.hasTime,
-        backgroundColor: group?.color || '#0f766e',
-        borderColor: group?.color || '#0f766e',
-        extendedProps: { ...task },
-        classNames: [task.isCompleted ? 'task-completed' : '']
-      };
-    });
-  }, [tasks, groups]);
-
-  const [menuPos, setMenuPos] = useState<{ x: number, y: number } | null>(null);
-  const [contextTaskId, setContextTaskId] = useState<string | null>(null);
-
   useEffect(() => {
-    const handleClick = () => setMenuPos(null);
-    window.addEventListener('click', handleClick);
-    return () => window.removeEventListener('click', handleClick);
-  }, []);
-
-  useEffect(() => {
-    if (calendarRef.current) {
-      calendarRef.current.getApi().changeView(viewMode);
-    }
+    const calendar = calendarRef.current?.getApi();
+    if (!calendar) return;
+    calendar.changeView(viewMode);
+    syncCalendarState(calendar);
   }, [viewMode]);
 
-  const handleSaveTask = () => {
-    if (!editingTask?.title) return;
-    if (editingTask.isMultiDay && editingTask.endDate && editingTask.date) {
-      if (parseISO(editingTask.endDate) < parseISO(editingTask.date)) {
-        alert('结束日期不能早于开始日期');
-        return;
-      }
-    }
-    const taskData = { ...editingTask, updatedAt: new Date().toISOString() } as Task;
-    if (editingTask.id) updateTask(editingTask.id, taskData);
-    else addTask({ ...taskData, id: crypto.randomUUID(), pomodoroCount: 0, tagIds: [], createdAt: new Date().toISOString() });
-    setIsTaskDialogOpen(false);
-  };
+  const currentWeekNumber = getISOWeek(new Date());
+  const currentWeekYear = getISOWeekYear(new Date());
+  const currentWeeklyPlan = weeklyPlans.find((plan) => plan.weekNumber === currentWeekNumber && plan.year === currentWeekYear);
+  const weeklyGoalOptions = currentWeeklyPlan?.goals || [];
 
-  const handleSaveDeadline = () => {
-    if (!editingDeadline?.title || !editingDeadline?.date) return;
-    if (editingDeadline.id) {
-      updateDeadline(editingDeadline.id, editingDeadline);
-    } else {
-      addDeadline({
-        ...editingDeadline,
-        id: crypto.randomUUID(),
-        priority: 'medium',
-        createdAt: new Date().toISOString()
-      } as Deadline);
-    }
-    setIsDeadlineDialogOpen(false);
-  };
+  const filteredTasks = useMemo(() => tasks.filter((task) => {
+    if (listFilter !== 'all' && task.listId !== listFilter) return false;
+    if (!query.trim()) return true;
+    const keyword = query.trim().toLowerCase();
+    return task.title.toLowerCase().includes(keyword) || (task.notes || '').toLowerCase().includes(keyword);
+  }), [listFilter, query, tasks]);
 
-  const handleDateClick = (arg: { dateStr: string; allDay: boolean }) => {
-    let startTime: string | undefined;
-    let endTime: string | undefined;
-    if (!arg.allDay && arg.dateStr.includes('T')) {
-      startTime = arg.dateStr;
-      const d = parseISO(arg.dateStr);
-      d.setHours(d.getHours() + 1);
-      endTime = d.toISOString();
-    }
-    setEditingTask({
-      title: '',
-      date: arg.dateStr.split('T')[0],
-      groupId: groups[0]?.id || 'work',
-      hasTime: !arg.allDay,
-      isCompleted: false,
-      startTime: startTime,
-      endTime: endTime
-    });
-    setIsTaskDialogOpen(true);
-  };
-
-  const buildEventUpdate = (event: EventApi, task: Task) => {
-    const start = event.start ?? (task.startTime ? parseISO(task.startTime) : null);
-    const end = event.end ?? (task.endTime ? parseISO(task.endTime) : null);
-    const date = start ? format(start, 'yyyy-MM-dd') : task.date;
-    const isMultiDay = !!(start && end && !isSameDay(start, end));
-    const endDate = end ? format(addDays(end, -1), 'yyyy-MM-dd') : undefined;
-
-    if (event.allDay) {
-      return {
-        date,
-        hasTime: false,
-        startTime: undefined,
-        endTime: undefined,
-        isMultiDay,
-        endDate: isMultiDay ? endDate : undefined,
-      };
-    }
-
+  const events = useMemo<EventInput[]>(() => filteredTasks.map((task) => {
+    const listColor = lists.find((list) => list.id === task.listId)?.color || '#2563eb';
     return {
-      date,
-      hasTime: true,
-      startTime: start?.toISOString(),
-      endTime: end?.toISOString(),
-      isMultiDay,
-      endDate: isMultiDay ? endDate : undefined,
+      id: task.id,
+      title: task.title,
+      start: task.scheduledStart,
+      end: task.scheduledEnd || task.dueAt,
+      allDay: task.allDay,
+      backgroundColor: `${listColor}22`,
+      borderColor: listColor,
+      textColor: '#0f172a',
+      classNames: [task.status === 'done' ? 'task-completed' : '', priorityClass[task.priority]],
+      extendedProps: {
+        priority: task.priority,
+        listColor,
+        listName: lists.find((list) => list.id === task.listId)?.name || '收件箱',
+      },
     };
+  }), [filteredTasks, lists]);
+
+  const selectedList = (id: string): PlannerList | undefined => lists.find((item) => item.id === id);
+
+  const openTaskDialog = (task?: Task) => {
+    setDraft(task ? { ...task } : createEmptyTask());
+    setDialogOpen(true);
   };
 
-  // 自定义事件渲染：在列表视图中添加复选框
-  const renderEventContent = (eventInfo: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
-    const task = eventInfo.event.extendedProps as Task;
-    
-    // 仅在列表视图显示复选框
-    if (viewMode === 'listWeek') {
-      return (
-        <div className="flex items-center gap-3 w-full">
-          <div 
-            className="cursor-pointer text-slate-400 hover:text-green-500 transition-colors shrink-0"
-            onClick={(e) => {
-              e.stopPropagation(); // 阻止冒泡，避免打开详情
-              updateTask(task.id, { isCompleted: !task.isCompleted });
-            }}
-          >
-            {task.isCompleted ? <CheckCircle2 size={18} className="text-green-500" /> : <Circle size={18} />}
-          </div>
-          <div className={cn("flex-1 truncate", task.isCompleted ? "line-through text-slate-400" : "text-slate-700")}>
-            {task.title}
-          </div>
-        </div>
-      );
-    }
-    
-    // 其他视图保持默认（时间+标题）
+  const toggleLinkedId = (field: 'linkedGoalIds' | 'linkedWeeklyGoalIds', id: string) => {
+    setDraft((current) => {
+      const values = current[field];
+      return {
+        ...current,
+        [field]: values.includes(id) ? values.filter((item) => item !== id) : [...values, id],
+      };
+    });
+  };
+
+  const saveDraft = () => {
+    if (!draft.title.trim()) return;
+
+    const payload: Task = {
+      ...draft,
+      title: draft.title.trim(),
+      updatedAt: new Date().toISOString(),
+      id: draft.id || crypto.randomUUID(),
+      createdAt: draft.id ? draft.createdAt : new Date().toISOString(),
+      dueAt: draft.scheduledEnd || draft.dueAt || draft.scheduledStart,
+      completedAt: draft.status === 'done' ? (draft.completedAt || new Date().toISOString()) : undefined,
+    };
+
+    if (draft.id) updateTask(draft.id, payload);
+    else addTask(payload);
+
+    syncTaskRelations(payload.id, payload.linkedGoalIds, payload.linkedWeeklyGoalIds);
+    setDialogOpen(false);
+  };
+
+  const handleSelect = (arg: DateSelectArg) => {
+    const date = arg.startStr.slice(0, 10);
+    const end = arg.end || new Date(arg.start.getTime() + 60 * 60 * 1000);
+    setDraft({
+      ...createEmptyTask(),
+      scheduledStart: arg.allDay ? `${date}T09:00:00` : toLocalDateTime(arg.start),
+      scheduledEnd: arg.allDay ? `${date}T10:00:00` : toLocalDateTime(end),
+      dueAt: arg.allDay ? `${date}T10:00:00` : toLocalDateTime(end),
+      allDay: arg.allDay,
+    });
+    setDialogOpen(true);
+  };
+
+  const handleDrop = (arg: EventDropArg) => {
+    updateTask(arg.event.id, {
+      scheduledStart: arg.event.start ? toLocalDateTime(arg.event.start) : undefined,
+      scheduledEnd: arg.event.end ? toLocalDateTime(arg.event.end) : undefined,
+      dueAt: arg.event.end ? toLocalDateTime(arg.event.end) : arg.event.start ? toLocalDateTime(arg.event.start) : undefined,
+      allDay: arg.event.allDay,
+    });
+  };
+
+  const handleResize = (arg: EventResizeDoneArg) => {
+    updateTask(arg.event.id, {
+      scheduledStart: arg.event.start ? toLocalDateTime(arg.event.start) : undefined,
+      scheduledEnd: arg.event.end ? toLocalDateTime(arg.event.end) : undefined,
+      dueAt: arg.event.end ? toLocalDateTime(arg.event.end) : arg.event.start ? toLocalDateTime(arg.event.start) : undefined,
+      allDay: arg.event.allDay,
+    });
+  };
+
+  const renderEventContent = (arg: EventContentArg) => {
+    const priority = arg.event.extendedProps.priority as TaskPriority;
+    const listColor = arg.event.extendedProps.listColor as string;
+    const listName = arg.event.extendedProps.listName as string;
+    const task = tasks.find((item) => item.id === arg.event.id);
+
     return (
-      <div className="fc-event-main-frame flex flex-col px-1 overflow-hidden">
-        {eventInfo.timeText && <div className="fc-event-time text-[10px] font-bold">{eventInfo.timeText}</div>}
-        <div className="fc-event-title-container">
-          <div className="fc-event-title font-bold truncate">{eventInfo.event.title}</div>
+      <div className="flex min-w-0 items-center gap-2 overflow-hidden rounded-xl px-1 py-0.5">
+        <button
+          type="button"
+          data-testid={`calendar-quick-complete-${arg.event.id}`}
+          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[10px] font-bold transition ${
+            task?.status === 'done' ? 'border-primary bg-primary text-white' : 'border-slate-300 bg-white text-slate-400 hover:border-primary hover:text-primary'
+          }`}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!task) return;
+            updateTask(task.id, {
+              status: task.status === 'done' ? 'todo' : 'done',
+              completedAt: task.status === 'done' ? undefined : new Date().toISOString(),
+            });
+          }}
+        >
+          ✓
+        </button>
+        <span className={`h-2 w-2 shrink-0 rounded-full ${priority === 'high' ? 'bg-rose-500' : priority === 'medium' ? 'bg-amber-500' : 'bg-slate-400'}`} />
+        <div className="min-w-0">
+          <div className="truncate text-xs font-semibold">{arg.event.title}</div>
+          <div className="mt-1 inline-flex max-w-full truncate rounded-full px-2 py-0.5 text-[10px] font-medium" style={{ backgroundColor: `${listColor}1A`, color: listColor }}>
+            {listName}
+          </div>
         </div>
       </div>
     );
   };
 
-  return (
-    <div className="h-[calc(100vh-180px)] flex flex-col space-y-6 animate-in fade-in duration-500 relative">
-      <div className="flex items-center justify-between no-drag">
-        <div className="flex gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
-          {[{ id: 'timeGridDay', label: '本日' }, { id: 'dayGridMonth', label: '本月' }, { id: 'listWeek', label: '清单' }].map(v => (
-            <Button 
-              key={v.id} 
-              variant={viewMode === v.id ? 'default' : 'ghost'} 
-              size="sm" 
-              className={cn("rounded-lg px-4 h-8 transition-all font-bold", viewMode === v.id ? "bg-white shadow-sm text-primary" : "text-slate-500")} 
-              onClick={() => setViewMode(v.id as 'timeGridDay' | 'dayGridMonth' | 'listWeek')}
-            >
-              {v.label}
-            </Button>
-          ))}
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" className="gap-2 rounded-xl border border-slate-200" onClick={() => setIsGroupDialogOpen(true)}><Settings2 size={16} /> 分类管理</Button>
-          <Button variant="outline" size="sm" className="gap-2 rounded-xl border border-slate-200" onClick={() => { setEditingDeadline({ date: format(new Date(), 'yyyy-MM-dd'), title: '' }); setIsDeadlineDialogOpen(true); }}><AlertCircle size={16} /> 新增截止日</Button>
-          <Button size="sm" className="gap-2 rounded-xl shadow-lg shadow-primary/10" onClick={() => { setEditingTask({ title: '', date: format(new Date(), 'yyyy-MM-dd'), groupId: groups[0]?.id || 'work', hasTime: false, isCompleted: false }); setIsTaskDialogOpen(true); }}><Plus size={16} /> 新建任务</Button>
-        </div>
-      </div>
+  const navigateCalendar = (action: 'prev' | 'next' | 'today') => {
+    const calendar = calendarRef.current?.getApi();
+    if (!calendar) return;
+    if (action === 'prev') calendar.prev();
+    if (action === 'next') calendar.next();
+    if (action === 'today') calendar.today();
+    syncCalendarState(calendar);
+  };
 
-      <div className="flex-1 bg-white rounded-3xl border border-slate-200 shadow-inner overflow-hidden calendar-container no-drag relative">
+  return (
+    <div className="flex h-full flex-col gap-6">
+      <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-black text-slate-900">日历与排程</h2>
+            <p className="mt-2 text-sm text-slate-500">支持日、周、月和列表视图，既能回看过去，也能安排未来。</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {viewOptions.map(([value, label]) => (
+              <Button
+                key={value}
+                variant={viewMode === value ? 'default' : 'outline'}
+                className="rounded-2xl"
+                onClick={() => setViewMode(value)}
+              >
+                {label}
+              </Button>
+            ))}
+            <Button data-testid="calendar-new-task" className="rounded-2xl" onClick={() => openTaskDialog()}>
+              <Plus size={16} className="mr-2" />
+              新建任务
+            </Button>
+          </div>
+        </div>
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Button data-testid="calendar-prev" variant="outline" className="h-11 rounded-2xl px-3" onClick={() => navigateCalendar('prev')}>
+              <ChevronLeft size={16} />
+            </Button>
+            <Button data-testid="calendar-next" variant="outline" className="h-11 rounded-2xl px-3" onClick={() => navigateCalendar('next')}>
+              <ChevronRight size={16} />
+            </Button>
+            <Button data-testid="calendar-today" variant="outline" className="h-11 rounded-2xl px-4" onClick={() => navigateCalendar('today')}>
+              回到今天
+            </Button>
+          </div>
+          <div data-testid="calendar-title" className="text-lg font-black text-slate-900">
+            {calendarTitle}
+          </div>
+        </div>
+        <div className="mt-5 flex flex-wrap gap-3">
+          <div className="relative min-w-[260px] flex-1">
+            <Search size={16} className="pointer-events-none absolute left-3 top-3 text-slate-400" />
+            <Input
+              data-testid="calendar-search-input"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              className="h-11 rounded-2xl border-slate-200 bg-slate-50 pl-10"
+              placeholder="搜索任务标题或备注"
+            />
+          </div>
+          <div className="relative">
+            <Filter size={16} className="pointer-events-none absolute left-3 top-3 text-slate-400" />
+            <select
+              value={listFilter}
+              onChange={(event) => setListFilter(event.target.value)}
+              className="h-11 rounded-2xl border border-slate-200 bg-slate-50 pl-10 pr-8 text-sm outline-none"
+            >
+              <option value="all">全部分类</option>
+              {lists.map((list) => (
+                <option key={list.id} value={list.id}>{list.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <section className="calendar-shell min-h-0 flex-1 overflow-hidden rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm">
         <FullCalendar
           ref={calendarRef}
           plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
           initialView={viewMode}
           headerToolbar={false}
-          events={events}
-          editable={true}
-          selectable={true}
-          locale="zh-cn"
           height="100%"
-          dateClick={handleDateClick}
-          eventClick={(info) => { setEditingTask(info.event.extendedProps as Task); setIsTaskDialogOpen(true); }}
-          eventContent={renderEventContent} // 自定义渲染逻辑
-          eventDidMount={(info) => {
-            info.el.addEventListener('contextmenu', (e) => {
-              e.preventDefault();
-              setContextTaskId(info.event.id);
-              setMenuPos({ x: e.clientX, y: e.clientY });
-            });
+          editable
+          selectable
+          nowIndicator
+          locale="zh-cn"
+          dayMaxEvents={3}
+          slotMinTime="06:00:00"
+          slotMaxTime="23:00:00"
+          events={events}
+          eventContent={renderEventContent}
+          select={handleSelect}
+          eventDrop={handleDrop}
+          eventResize={handleResize}
+          datesSet={(arg: DatesSetArg) => setCalendarTitle(arg.view.title)}
+          eventClick={(arg: EventClickArg) => {
+            const task = tasks.find((item) => item.id === arg.event.id);
+            if (task) openTaskDialog(task);
           }}
-          eventDrop={(info) => {
-            const task = info.event.extendedProps as Task;
-            updateTask(task.id, buildEventUpdate(info.event, task));
-          }}
-          eventResize={(info) => {
-            const task = info.event.extendedProps as Task;
-            updateTask(task.id, buildEventUpdate(info.event, task));
-          }}
-          eventOrder={["allDay", "start", "-duration", "title"]}
         />
+      </section>
 
-        {menuPos && (
-          <div className="fixed z-[1000] bg-white border border-slate-200 rounded-xl shadow-2xl p-1 min-w-[140px] animate-in zoom-in-95 duration-100" style={{ top: menuPos.y, left: menuPos.x }}>
-            <button className="w-full flex items-center gap-2 px-3 py-2 text-xs font-black text-slate-600 hover:bg-slate-50 rounded-lg" onClick={() => { const t = tasks.find(t => t.id === contextTaskId); if (t) setEditingTask(t); setIsTaskDialogOpen(true); setMenuPos(null); }}><Edit3 size={14} /> 编辑详情</button>
-            <button className="w-full flex items-center gap-2 px-3 py-2 text-xs font-black text-red-500 hover:bg-red-50 rounded-lg" onClick={() => { if (contextTaskId) deleteTask(contextTaskId); setMenuPos(null); }}><Trash2 size={14} /> 彻底删除</button>
-          </div>
-        )}
-      </div>
-
-      {deadlines.length > 0 && (
-        <div className="flex gap-4 pt-2 overflow-x-auto pb-2 no-scrollbar">
-          {deadlines.map(dl => {
-            const daysLeft = differenceInDays(parseISO(dl.date), new Date());
-            return (
-              <div key={dl.id} className="bg-white border border-slate-200 rounded-2xl p-4 flex items-center justify-between group min-w-[220px] shadow-sm transition-all hover:border-primary/20">
-                <div className="space-y-1">
-                  <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1"><Clock size={10} /> {dl.date}</div>
-                  <h4 className="text-sm font-black text-slate-700 truncate max-w-[100px]">{dl.title}</h4>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="text-right">
-                    <div className={cn("text-xl font-black", daysLeft <= 3 ? "text-red-500" : "text-primary")}>{daysLeft < 0 ? 'Over' : `${daysLeft}d`}</div>
-                  </div>
-                  <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                    <button onClick={() => { setEditingDeadline(dl); setIsDeadlineDialogOpen(true); }} className="text-slate-300 hover:text-primary"><Edit3 size={12} /></button>
-                    <button onClick={() => deleteDeadline(dl.id)} className="text-slate-300 hover:text-red-400"><Trash2 size={12} /></button>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      <Dialog open={isTaskDialogOpen} onOpenChange={setIsTaskDialogOpen}>
-        <DialogContent className="sm:max-w-[450px] rounded-3xl border-slate-200 bg-white shadow-2xl">
-          <DialogHeader><DialogTitle className="text-2xl font-black text-slate-800">任务详情</DialogTitle></DialogHeader>
-          <div className="grid gap-6 py-4 max-h-[75vh] overflow-y-auto px-1">
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">任务名称</label>
-              <Input className="bg-slate-50 border-slate-200 rounded-xl h-12 text-lg font-bold" value={editingTask?.title || ''} onChange={e => setEditingTask(prev => ({ ...prev, title: e.target.value }))} />
-            </div>
-            
-            <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-              <div className="flex gap-3 items-center"><CheckCircle2 size={20} className={cn(editingTask?.isCompleted ? "text-green-500" : "text-slate-300")} /><span className="text-sm font-black text-slate-700">标记为已完成</span></div>
-              <input type="checkbox" checked={editingTask?.isCompleted || false} onChange={e => setEditingTask(prev => ({ ...prev, isCompleted: e.target.checked }))} className="w-5 h-5 accent-green-500" />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase px-1">开始日期</label><Input type="date" className="rounded-xl bg-slate-50 h-10 font-bold" value={editingTask?.date || ''} onChange={e => setEditingTask(prev => ({ ...prev, date: e.target.value }))} /></div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase px-1">任务分类</label>
-                <div className="relative">
-                  <select 
-                    className="w-full h-10 bg-slate-50 border border-slate-200 rounded-xl px-3 text-sm font-bold appearance-none" 
-                    value={editingTask?.groupId || ''} 
-                    onChange={e => setEditingTask(prev => ({ ...prev, groupId: e.target.value }))}
-                  >
-                    {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-                  </select>
-                  <Tag className="absolute right-3 top-3 text-slate-400 pointer-events-none" size={14} />
-                </div>
-              </div>
-            </div>
-
-            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-4">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">这是一个跨天任务？</span>
-                <input 
-                  type="checkbox" 
-                  checked={editingTask?.isMultiDay || false} 
-                  onChange={e => setEditingTask(prev => ({ 
-                    ...prev, 
-                    isMultiDay: e.target.checked,
-                    endDate: e.target.checked ? prev?.endDate : undefined 
-                  }))} 
-                  className="w-4 h-4 accent-primary" 
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="max-h-[90vh] w-[min(92vw,860px)] max-w-[860px] overflow-hidden rounded-[28px] border-slate-200 bg-white p-0">
+          <DialogHeader className="px-6 pt-6">
+            <DialogTitle className="text-2xl font-black text-slate-900">{draft.id ? '编辑任务' : '新建任务'}</DialogTitle>
+          </DialogHeader>
+          <div className="grid max-h-[calc(90vh-132px)] gap-4 overflow-y-auto px-6 py-2">
+            <Input
+              data-testid="calendar-task-title"
+              value={draft.title}
+              onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}
+              className="h-12 rounded-2xl border-slate-200 bg-slate-50"
+              placeholder="任务标题"
+            />
+            <textarea
+              value={draft.notes || ''}
+              onChange={(event) => setDraft((current) => ({ ...current, notes: event.target.value }))}
+              className="min-h-[120px] rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm outline-none"
+              placeholder="备注、执行标准、上下文"
+            />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">开始时间</div>
+                <Input
+                  type="datetime-local"
+                  value={toDateTimeInputValue(draft.scheduledStart)}
+                  onChange={(event) => setDraft((current) => ({ ...current, scheduledStart: normalizeDateTimeInput(event.target.value) }))}
+                  className="rounded-2xl border-slate-200 bg-slate-50"
                 />
               </div>
-              {editingTask?.isMultiDay && (
-                <div className="space-y-2 pt-2 border-t border-slate-200">
-                  <label className="text-[10px] font-black text-slate-400 uppercase px-1">结束日期</label>
-                  <Input 
-                    type="date" 
-                    className="rounded-xl bg-white h-10 font-bold" 
-                    value={editingTask?.endDate || ''} 
-                    min={editingTask?.date} 
-                    onChange={e => setEditingTask(prev => ({ ...prev, endDate: e.target.value }))} 
-                  />
-                </div>
-              )}
+              <div>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">结束时间</div>
+                <Input
+                  type="datetime-local"
+                  value={toDateTimeInputValue(draft.scheduledEnd)}
+                  onChange={(event) => {
+                    const next = normalizeDateTimeInput(event.target.value);
+                    setDraft((current) => ({ ...current, scheduledEnd: next, dueAt: next || current.dueAt }));
+                  }}
+                  className="rounded-2xl border-slate-200 bg-slate-50"
+                />
+              </div>
             </div>
-
-            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-4">
-              <div className="flex items-center justify-between"><span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">设定具体时段</span><input type="checkbox" checked={editingTask?.hasTime || false} onChange={e => setEditingTask(prev => ({ ...prev, hasTime: e.target.checked }))} className="w-4 h-4 accent-primary" /></div>
-              {editingTask?.hasTime && (
-                <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-200">
-                  <Input type="time" className="h-9 rounded-lg bg-white" value={editingTask?.startTime ? format(safeParseDate(editingTask.startTime), 'HH:mm') : ''} onChange={e => { const d = safeParseDate(editingTask?.date); const [h, m] = e.target.value.split(':').map(Number); d.setHours(h, m, 0, 0); setEditingTask(prev => ({ ...prev, startTime: d.toISOString() })); }} />
-                  <Input type="time" className="h-9 rounded-lg bg-white" value={editingTask?.endTime ? format(safeParseDate(editingTask.endTime), 'HH:mm') : ''} onChange={e => { const d = safeParseDate(editingTask?.date); const [h, m] = e.target.value.split(':').map(Number); d.setHours(h, m, 0, 0); setEditingTask(prev => ({ ...prev, endTime: d.toISOString() })); }} />
-                </div>
-              )}
-            </div>
-            
-            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2"><Repeat size={16} className="text-primary" /><span className="text-sm font-bold text-slate-700">重复周期</span></div>
-                <select 
-                  className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold" 
-                  value={editingTask?.recurrence?.frequency || 'none'} 
-                  onChange={e => setEditingTask(prev => prev ? ({ 
-                    ...prev, 
-                    recurrence: { 
-                      frequency: e.target.value as RecurrenceFrequency,
-                      smartWorkdayOnly: prev.recurrence?.smartWorkdayOnly || false 
-                    } 
-                  }) : null)}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">优先级</div>
+                <select
+                  value={draft.priority}
+                  onChange={(event) => setDraft((current) => ({ ...current, priority: event.target.value as TaskPriority }))}
+                  className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none"
                 >
-                  <option value="none">不重复</option>
-                  <option value="daily">每天</option>
-                  <option value="weekly">每周</option>
-                  <option value="monthly">每月</option>
+                  {priorityOptions.map((priority) => (
+                    <option key={priority} value={priority}>{priorityLabel[priority]}</option>
+                  ))}
                 </select>
               </div>
-              {editingTask?.recurrence?.frequency !== 'none' && (
-                <div className="flex items-center justify-between pt-2 border-t border-slate-200">
-                  <span className="text-xs font-medium text-slate-500">仅工作日 (含调休)</span>
-                  <input 
-                    type="checkbox" 
-                    checked={editingTask?.recurrence?.smartWorkdayOnly || false} 
-                    onChange={e => setEditingTask(prev => prev ? ({ 
-                      ...prev, 
-                      recurrence: { 
-                        frequency: prev.recurrence?.frequency || 'none',
-                        smartWorkdayOnly: e.target.checked 
-                      } 
-                    }) : null)} 
-                    className="w-4 h-4 accent-primary" 
-                  />
-                </div>
-              )}
+              <div>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">状态</div>
+                <select
+                  data-testid="calendar-task-status"
+                  value={draft.status}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      status: event.target.value as TaskStatus,
+                      completedAt: event.target.value === 'done' ? current.completedAt || new Date().toISOString() : undefined,
+                    }))
+                  }
+                  className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none"
+                >
+                  {statusOptions.map((status) => (
+                    <option key={status} value={status}>{statusLabel[status]}</option>
+                  ))}
+                </select>
+              </div>
             </div>
-          </div>
-          <DialogFooter className="border-t border-slate-100 pt-4"><Button size="lg" onClick={handleSaveTask} className="w-full h-12 rounded-xl font-black shadow-lg shadow-primary/10">保存计划</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">分类</div>
+                <select
+                  data-testid="calendar-task-list-select"
+                  value={draft.listId}
+                  onChange={(event) => setDraft((current) => ({ ...current, listId: event.target.value }))}
+                  className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none"
+                >
+                  {lists.map((list) => (
+                    <option key={list.id} value={list.id}>{list.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            {selectedList(draft.listId) && (
+              <div className="rounded-2xl bg-slate-50 p-3 text-sm text-slate-500">
+                当前归属：<span className="font-semibold text-slate-700">{selectedList(draft.listId)?.name}</span>
+              </div>
+            )}
 
-      <Dialog open={isGroupDialogOpen} onOpenChange={setIsGroupDialogOpen}>
-        <DialogContent className="sm:max-w-[450px] rounded-3xl bg-white shadow-2xl border-slate-200">
-          <DialogHeader><DialogTitle className="text-xl font-black">管理分类</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="grid gap-2 max-h-[300px] overflow-y-auto pr-1 no-scrollbar">
-              {groups.map(group => (
-                <div key={group.id} className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-100 rounded-2xl group">
-                  <input type="color" value={group.color} onChange={(e) => updateGroup(group.id, { color: e.target.value })} className="w-6 h-6 rounded-lg cursor-pointer bg-transparent border-none" />
-                  <Input value={group.name} onChange={(e) => updateGroup(group.id, { name: e.target.value })} className="flex-1 bg-transparent border-none shadow-none font-bold focus-visible:ring-0 p-0 h-auto" />
-                  <Button variant="ghost" size="icon" className="text-red-400 hover:text-red-600 rounded-lg h-8 w-8" onClick={() => groups.length > 1 && deleteGroup(group.id)}><Trash2 size={14} /></Button>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="rounded-2xl bg-slate-50 p-4">
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                  <Target size={14} className="text-primary" />
+                  关联季度目标
                 </div>
-              ))}
-            </div>
-            <div className="flex gap-2 pt-4 border-t border-slate-100">
-              <input type="color" value={newGroupColor} onChange={(e) => setNewGroupColor(e.target.value)} className="w-11 h-11 rounded-xl border border-slate-200 cursor-pointer bg-transparent" />
-              <Input placeholder="分类名称..." value={newGroupName} onChange={(e) => setNewGroupName(e.target.value)} className="flex-1 h-11 rounded-xl bg-slate-50 border border-slate-200 font-bold" />
-              <Button onClick={() => { if(newGroupName.trim()){ addGroup({id: crypto.randomUUID(), name: newGroupName, color: newGroupColor}); setNewGroupName(''); } }} className="h-11 w-11 rounded-xl p-0 shadow-md shadow-primary/10"><Plus size={20} /></Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {goals.length ? goals.map((goal) => {
+                    const active = draft.linkedGoalIds.includes(goal.id);
+                    return (
+                      <button
+                        key={goal.id}
+                        type="button"
+                        onClick={() => toggleLinkedId('linkedGoalIds', goal.id)}
+                        className={`rounded-full px-3 py-2 text-xs transition ${active ? 'bg-primary text-white' : 'bg-white text-slate-600'}`}
+                      >
+                        {goal.title}
+                      </button>
+                    );
+                  }) : (
+                    <p className="text-sm text-slate-500">当前还没有季度目标。</p>
+                  )}
+                </div>
+              </div>
 
-      <Dialog open={isDeadlineDialogOpen} onOpenChange={setIsDeadlineDialogOpen}>
-        <DialogContent className="sm:max-w-[400px] rounded-3xl bg-white border-slate-200 shadow-2xl">
-          <DialogHeader><DialogTitle className="text-xl font-black">{editingDeadline?.id ? '编辑截止日' : '设定截止日'}</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">项目名称</label>
-              <Input className="bg-slate-50 border-slate-200 rounded-xl font-bold" value={editingDeadline?.title || ''} onChange={e => setEditingDeadline(prev => ({ ...prev, title: e.target.value }))} />
+              <div className="rounded-2xl bg-slate-50 p-4">
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                  <Flag size={14} className="text-primary" />
+                  关联本周目标
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {weeklyGoalOptions.length ? weeklyGoalOptions.map((goal: WeeklyGoal) => {
+                    const active = draft.linkedWeeklyGoalIds.includes(goal.id);
+                    return (
+                      <button
+                        key={goal.id}
+                        type="button"
+                        onClick={() => toggleLinkedId('linkedWeeklyGoalIds', goal.id)}
+                        className={`rounded-full px-3 py-2 text-xs transition ${active ? 'bg-slate-900 text-white' : 'bg-white text-slate-600'}`}
+                      >
+                        {goal.text}
+                      </button>
+                    );
+                  }) : (
+                    <p className="text-sm text-slate-500">本周还没有可关联的周目标。</p>
+                  )}
+                </div>
+              </div>
             </div>
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">截止日期</label>
-              <Input type="date" className="bg-slate-50 border-slate-200 rounded-xl font-bold" value={editingDeadline?.date || ''} onChange={e => setEditingDeadline(prev => ({ ...prev, date: e.target.value }))} />
-            </div>
+
+            {draft.id && (
+              <Button
+                variant="ghost"
+                className="justify-start rounded-2xl text-rose-600 hover:bg-rose-50"
+                onClick={() => {
+                  deleteTask(draft.id);
+                  setDialogOpen(false);
+                }}
+              >
+                删除任务
+              </Button>
+            )}
           </div>
-          <DialogFooter><Button onClick={handleSaveDeadline} className="w-full h-12 rounded-xl font-black shadow-lg shadow-primary/10">确认</Button></DialogFooter>
+          <DialogFooter className="gap-2 px-6 pb-6">
+            <Button variant="outline" className="rounded-2xl" onClick={() => setDialogOpen(false)}>取消</Button>
+            <Button data-testid="calendar-task-save" className="rounded-2xl" onClick={saveDraft}>保存</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

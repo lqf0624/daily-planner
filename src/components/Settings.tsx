@@ -1,243 +1,270 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Database, Settings as SettingsIcon, RefreshCw, Download, Upload, Info, Loader2,
-  CheckCircle2, AlertTriangle
-} from 'lucide-react';
-import { useAppStore } from '../stores/useAppStore';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/tabs';
-import { check } from '@tauri-apps/plugin-updater';
-import { relaunch } from '@tauri-apps/plugin-process';
-import { save, open } from '@tauri-apps/plugin-dialog';
-import { writeTextFile, readTextFile } from '@tauri-apps/plugin-fs';
+import { useEffect, useRef, useState } from 'react';
+import { Database, Download, FolderTree, Info, Plus, RefreshCcw, Settings as SettingsIcon, Trash2, Upload } from 'lucide-react';
 import { getVersion } from '@tauri-apps/api/app';
+import { save, open } from '@tauri-apps/plugin-dialog';
+import { readTextFile, writeTextFile } from '@tauri-apps/plugin-fs';
+import { useAppStore } from '../stores/useAppStore';
+import { checkForUpdates, relaunchApp, supportsUpdater } from '../services/updater';
+import { Button } from './ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
+import { Input } from './ui/input';
 
 interface SettingsProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
-  const { aiSettings, updateAISettings, importData } = useAppStore();
-  const [appVersion, setAppVersion] = useState('Loading...');
-  
-  const [isChecking, setIsChecking] = useState(false);
-  const [updateStatus, setUpdateStatus] = useState<'idle' | 'available' | 'downloading' | 'ready' | 'error' | 'uptodate'>('idle');
-  const [errorMessage, setErrorMessage] = useState('');
-  const [downloadProgress, setDownloadProgress] = useState(0);
-  const [downloadSpeed, setDownloadSpeed] = useState('0 KB/s');
-  const [newVersion, setNewVersion] = useState('');
-  const [updateObj, setUpdateObj] = useState<any>(null); // eslint-disable-line @typescript-eslint/no-explicit-any
+const Settings = ({ isOpen, onClose }: SettingsProps) => {
+  const {
+    aiSettings,
+    lists,
+    updateAISettings,
+    importData,
+    addList,
+    updateList,
+    deleteList,
+  } = useAppStore();
+
+  const [version, setVersion] = useState('0.0.0');
+  const [listName, setListName] = useState('');
+  const [listColor, setListColor] = useState('#2563eb');
+  const [updateStatus, setUpdateStatus] = useState('未检查更新');
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [isInstallingUpdate, setIsInstallingUpdate] = useState(false);
+  const [availableUpdateVersion, setAvailableUpdateVersion] = useState<string | null>(null);
+  const [updateNotes, setUpdateNotes] = useState<string | null>(null);
+  const pendingUpdateRef = useRef<Awaited<ReturnType<typeof checkForUpdates>>>(null);
 
   useEffect(() => {
-    getVersion().then(v => setAppVersion(v));
+    getVersion().then(setVersion).catch(() => undefined);
   }, []);
 
+  useEffect(() => {
+    if (!isOpen || !supportsUpdater()) return;
+    void handleCheckUpdate(true);
+  }, [isOpen]);
+
   const handleExport = async () => {
-    try {
-      const data = useAppStore.getState();
-      const content = JSON.stringify(data, null, 2);
-      const path = await save({
-        filters: [{ name: 'JSON', extensions: ['json'] }],
-        defaultPath: `daily-planner-backup-${new Date().toISOString().split('T')[0]}.json`
-      });
-      if (path) {
-        await writeTextFile(path, content);
-        alert('数据已成功导出！');
-      }
-    } catch (e) {
-      alert('导出失败: ' + e);
-    }
+    const path = await save({
+      defaultPath: `daily-planner-backup-${new Date().toISOString().slice(0, 10)}.json`,
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+    });
+    if (!path) return;
+    await writeTextFile(path, JSON.stringify(useAppStore.getState(), null, 2));
   };
 
   const handleImport = async () => {
-    try {
-      const path = await open({
-        multiple: false,
-        filters: [{ name: 'JSON', extensions: ['json'] }]
-      });
-      if (path && typeof path === 'string') {
-        const content = await readTextFile(path);
-        const json = JSON.parse(content);
-        if (!json.tasks || !json.habits) throw new Error('无效的备份文件');
-        importData(json);
-        alert('导入成功！');
-        window.location.reload();
-      }
-    } catch (e) {
-      alert('导入失败: ' + e);
-    }
+    const path = await open({
+      multiple: false,
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+    });
+    if (!path || typeof path !== 'string') return;
+    const content = await readTextFile(path);
+    importData(JSON.parse(content));
+    window.location.reload();
   };
 
-  const handleCheckUpdate = async () => {
-    if (isChecking) return;
-    setIsChecking(true);
-    setUpdateStatus('idle');
-    setErrorMessage('');
-    
-    console.log("Starting update check...");
+  const handleAddList = () => {
+    if (!listName.trim()) return;
+    addList({
+      id: crypto.randomUUID(),
+      name: listName.trim(),
+      color: listColor,
+    });
+    setListName('');
+    setListColor('#2563eb');
+  };
+
+  const handleCheckUpdate = async (silent = false) => {
+    if (!supportsUpdater()) {
+      setUpdateStatus('当前环境不支持自动更新');
+      return;
+    }
+
+    setIsCheckingUpdate(true);
+    if (!silent) setUpdateStatus('正在检查更新...');
+
     try {
-      const update = await check();
-      console.log("Update check result:", update);
-      if (update?.available) {
-        setNewVersion(update.version);
-        setUpdateObj(update);
-        setUpdateStatus('available');
-      } else {
-        setUpdateStatus('uptodate');
+      const update = await checkForUpdates();
+      pendingUpdateRef.current = update;
+
+      if (!update) {
+        setAvailableUpdateVersion(null);
+        setUpdateNotes(null);
+        setUpdateStatus('当前已经是最新版本');
+        return;
       }
-    } catch (e: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
-      console.error("Update check failed:", e);
-      setUpdateStatus('error');
-      setErrorMessage(e.message || '网络连接失败或配置错误');
+
+      setAvailableUpdateVersion(update.version);
+      setUpdateNotes(update.body || null);
+      setUpdateStatus(`发现新版本 ${update.version}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '检查更新失败';
+      setUpdateStatus(`检查更新失败：${message}`);
     } finally {
-      setIsChecking(false);
+      setIsCheckingUpdate(false);
     }
   };
 
-  const startDownload = async () => {
-    if (!updateObj) return;
-    setUpdateStatus('downloading');
-    let downloaded = 0;
-    let contentLength = 0;
-    const startTime = Date.now();
+  const handleInstallUpdate = async () => {
+    const update = pendingUpdateRef.current;
+    if (!update) return;
+
+    setIsInstallingUpdate(true);
+    setUpdateStatus(`正在下载并安装 ${update.version}...`);
 
     try {
-      await updateObj.downloadAndInstall((event: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
-        if (event.event === 'Started') contentLength = event.data.contentLength || 0;
-        else if (event.event === 'Progress') {
-          downloaded += event.data.chunkLength;
-          if (contentLength > 0) setDownloadProgress(Math.round((downloaded / contentLength) * 100));
-          const elapsed = (Date.now() - startTime) / 1000;
-          if (elapsed > 0) {
-            const speed = downloaded / elapsed;
-            setDownloadSpeed(speed > 1024 * 1024 ? `${(speed / 1024 / 1024).toFixed(2)} MB/s` : `${(speed / 1024).toFixed(2)} KB/s`);
-          }
-        } else if (event.event === 'Finished') setUpdateStatus('ready');
-      });
-    } catch (e) {
-      console.error(e);
-      setUpdateStatus('error');
-      setErrorMessage('下载过程中断');
+      await update.downloadAndInstall();
+      setUpdateStatus(`已安装 ${update.version}，应用即将重启`);
+      await relaunchApp();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '安装更新失败';
+      setUpdateStatus(`安装更新失败：${message}`);
+    } finally {
+      setIsInstallingUpdate(false);
     }
   };
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[550px] h-[65vh] flex flex-col p-0 overflow-hidden rounded-3xl border-slate-200 bg-white">
-        <DialogHeader className="p-6 pb-2 border-b border-slate-100 flex flex-row items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-primary/10 rounded-xl"><SettingsIcon size={20} className="text-primary" /></div>
-            <DialogTitle className="text-xl font-black text-slate-800">应用设置</DialogTitle>
-          </div>
+      <DialogContent className="max-h-[92vh] w-[min(94vw,1120px)] max-w-[1120px] overflow-hidden rounded-[32px] border-slate-200 bg-white p-0">
+        <DialogHeader className="border-b border-slate-100 p-6">
+          <DialogTitle className="flex items-center gap-3 text-2xl font-black text-slate-900">
+            <div className="rounded-2xl bg-primary/10 p-2">
+              <SettingsIcon size={20} className="text-primary" />
+            </div>
+            应用设置
+          </DialogTitle>
         </DialogHeader>
 
-        <Tabs defaultValue="ai" className="flex-1 flex overflow-hidden">
-          <TabsList className="w-40 flex flex-col h-full bg-slate-50 p-4 gap-2 border-r border-slate-100 rounded-none">
-            <TabsTrigger value="ai" className="w-full justify-start font-bold rounded-xl data-[state=active]:bg-white data-[state=active]:shadow-sm">AI 设置</TabsTrigger>
-            <TabsTrigger value="data" className="w-full justify-start font-bold rounded-xl data-[state=active]:bg-white data-[state=active]:shadow-sm">数据管理</TabsTrigger>
-            <TabsTrigger value="about" className="w-full justify-start font-bold rounded-xl data-[state=active]:bg-white data-[state=active]:shadow-sm">关于应用</TabsTrigger>
-          </TabsList>
-
-          <div className="flex-1 overflow-y-auto p-6">
-            <TabsContent value="ai" className="m-0 space-y-6">
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">API Base URL</label>
-                  <Input value={aiSettings.baseUrl} onChange={e => updateAISettings({ baseUrl: e.target.value })} className="h-12 rounded-xl bg-slate-50 border-slate-200" placeholder="https://api.openai.com/v1" />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">API Key</label>
-                  <Input type="password" value={aiSettings.apiKey} onChange={e => updateAISettings({ apiKey: e.target.value })} className="h-12 rounded-xl bg-slate-50 border-slate-200" placeholder="sk-..." />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">模型名称</label>
-                  <Input value={aiSettings.model} onChange={e => updateAISettings({ model: e.target.value })} className="h-12 rounded-xl bg-slate-50 border-slate-200" placeholder="gpt-3.5-turbo" />
-                </div>
+        <div className="grid max-h-[calc(92vh-96px)] gap-6 overflow-y-auto p-6 xl:grid-cols-[1.1fr_1fr_0.95fr]">
+          <section data-testid="settings-ai" className="rounded-[28px] border border-slate-200 bg-slate-50/70 p-5">
+            <div className="flex items-center gap-2 text-lg font-black text-slate-900">
+              <Info size={18} className="text-primary" />
+              AI 助手
+            </div>
+            <div className="mt-4 space-y-4">
+              <div>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Base URL</div>
+                <Input data-testid="settings-ai-base-url" value={aiSettings.baseUrl} onChange={(event) => updateAISettings({ baseUrl: event.target.value })} className="rounded-2xl border-slate-200 bg-white" />
               </div>
-            </TabsContent>
-
-            <TabsContent value="data" className="m-0 space-y-6">
-              <div className="p-6 border-2 border-dashed border-slate-100 rounded-3xl flex flex-col items-center justify-center text-center gap-4">
-                <Database size={40} className="text-slate-200" />
-                <div className="space-y-1">
-                  <h4 className="font-black text-slate-700">本地备份</h4>
-                  <p className="text-xs text-slate-400 font-medium px-4">使用原生文件对话框安全地导出或导入您的数据。</p>
-                </div>
-                <div className="flex gap-3 w-full mt-2">
-                  <Button variant="outline" onClick={handleExport} className="flex-1 rounded-xl h-11 border-slate-200 gap-2">
-                    <Download size={16} /> 导出备份
-                  </Button>
-                  <Button variant="outline" onClick={handleImport} className="flex-1 rounded-xl h-11 border-slate-200 gap-2">
-                    <Upload size={16} /> 导入备份
-                  </Button>
-                </div>
+              <div>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">API Key</div>
+                <Input data-testid="settings-ai-api-key" type="password" value={aiSettings.apiKey} onChange={(event) => updateAISettings({ apiKey: event.target.value })} className="rounded-2xl border-slate-200 bg-white" />
               </div>
-            </TabsContent>
+              <div>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">模型</div>
+                <Input data-testid="settings-ai-model" value={aiSettings.model} onChange={(event) => updateAISettings({ model: event.target.value })} className="rounded-2xl border-slate-200 bg-white" />
+              </div>
+            </div>
+          </section>
 
-            <TabsContent value="about" className="m-0 space-y-6">
-              <div className="space-y-6">
-                <div className="flex items-center gap-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                  <div className="w-12 h-12 bg-white rounded-xl border border-slate-200 flex items-center justify-center shadow-sm"><Info size={24} className="text-primary" /></div>
-                  <div>
-                    <h4 className="font-black text-slate-800">Daily Planner AI</h4>
-                    <p className="text-xs text-slate-400 font-bold">Version {appVersion}</p>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Button onClick={handleCheckUpdate} disabled={isChecking || updateStatus === 'downloading'} className="w-full h-12 rounded-xl font-bold gap-2 shadow-lg shadow-primary/10">
-                    {isChecking ? <Loader2 className="animate-spin" size={18} /> : <RefreshCw size={18} />}
-                    {isChecking ? '正在检查...' : '检查更新'}
-                  </Button>
-
-                  {/* 状态反馈区域 */}
-                  {updateStatus === 'uptodate' && (
-                    <div className="flex items-center justify-center gap-2 p-3 bg-green-50 rounded-xl text-green-700 text-xs font-bold animate-in fade-in">
-                      <CheckCircle2 size={14} /> 当前已是最新版本
-                    </div>
-                  )}
-
-                  {updateStatus === 'error' && (
-                    <div className="flex items-center justify-center gap-2 p-3 bg-red-50 rounded-xl text-red-600 text-xs font-bold animate-in fade-in">
-                      <AlertTriangle size={14} /> {errorMessage}
-                    </div>
+          <section className="rounded-[28px] border border-slate-200 bg-slate-50/70 p-5">
+            <div className="flex items-center gap-2 text-lg font-black text-slate-900">
+              <FolderTree size={18} className="text-primary" />
+              任务分类
+            </div>
+            <p className="mt-3 text-sm text-slate-500">这里的分类会同步出现在任务创建、日历筛选和清单归属里。</p>
+            <div className="mt-4 flex gap-3">
+              <Input
+                data-testid="settings-list-name"
+                value={listName}
+                onChange={(event) => setListName(event.target.value)}
+                className="rounded-2xl border-slate-200 bg-white"
+                placeholder="新分类名称"
+              />
+              <input
+                data-testid="settings-list-color"
+                type="color"
+                value={listColor}
+                onChange={(event) => setListColor(event.target.value)}
+                className="h-11 w-14 rounded-2xl border border-slate-200 bg-white p-1"
+              />
+              <Button data-testid="settings-list-add" className="rounded-2xl" onClick={handleAddList}>
+                <Plus size={16} className="mr-2" />
+                添加
+              </Button>
+            </div>
+            <div className="mt-4 space-y-3">
+              {lists.map((list) => (
+                <div key={list.id} className="flex items-center gap-3 rounded-2xl bg-white p-3">
+                  <span className="h-3 w-3 rounded-full" style={{ backgroundColor: list.color }} />
+                  <Input
+                    value={list.name}
+                    onChange={(event) => updateList(list.id, { name: event.target.value })}
+                    className="h-10 rounded-xl border-slate-200 bg-slate-50"
+                  />
+                  {list.id !== 'inbox' && (
+                    <button
+                      type="button"
+                      className="rounded-xl p-2 text-rose-600 transition hover:bg-rose-50"
+                      onClick={() => deleteList(list.id)}
+                    >
+                      <Trash2 size={16} />
+                    </button>
                   )}
                 </div>
+              ))}
+            </div>
+          </section>
 
-                {updateStatus === 'available' && (
-                  <div className="p-4 bg-primary/5 border border-primary/20 rounded-2xl space-y-4 animate-in slide-in-from-top-2">
-                    <span className="text-sm font-black text-primary">发现新版本: {newVersion}</span>
-                    <Button onClick={startDownload} className="w-full h-10 rounded-xl font-bold">立即下载并更新</Button>
-                  </div>
-                )}
-
-                {updateStatus === 'downloading' && (
-                  <div className="space-y-3 p-4 bg-slate-50 rounded-2xl border border-slate-100 animate-in fade-in">
-                    <div className="flex justify-between items-end">
-                      <span className="text-xs font-black text-slate-500">正在下载...</span>
-                      <span className="text-xs font-bold text-primary">{downloadSpeed}</span>
-                    </div>
-                    <div className="h-2 w-full bg-slate-200 rounded-full overflow-hidden">
-                      <div className="h-full bg-primary transition-all duration-300" style={{ width: `${downloadProgress}%` }} />
-                    </div>
-                    <p className="text-[10px] text-center text-slate-400">{downloadProgress}% 完成</p>
-                  </div>
-                )}
-
-                {updateStatus === 'ready' && (
-                  <div className="p-4 bg-green-50 border border-green-200 rounded-2xl text-center space-y-3 animate-in zoom-in-95">
-                    <CheckCircle2 size={32} className="mx-auto text-green-500" />
-                    <p className="text-xs text-green-600 font-medium">下载完成，请重启安装。</p>
-                    <Button onClick={() => relaunch()} className="w-full h-10 bg-green-500 hover:bg-green-600 rounded-xl font-bold text-white">立即重启</Button>
-                  </div>
-                )}
+          <section className="rounded-[28px] border border-slate-200 bg-slate-50/70 p-5">
+            <div className="flex items-center gap-2 text-lg font-black text-slate-900">
+              <Database size={18} className="text-primary" />
+              数据与更新
+            </div>
+            <p className="mt-3 text-sm text-slate-500">保持本地数据可恢复，也支持直接从应用内检查和安装新版本。</p>
+            <div className="mt-6 grid gap-3">
+              <Button variant="outline" className="justify-start rounded-2xl" onClick={handleExport}>
+                <Download size={16} className="mr-2" />
+                导出完整备份
+              </Button>
+              <Button variant="outline" className="justify-start rounded-2xl" onClick={handleImport}>
+                <Upload size={16} className="mr-2" />
+                导入备份
+              </Button>
+            </div>
+            <div className="mt-6 rounded-2xl bg-white p-4 text-sm text-slate-500">
+              当前版本 <span className="font-semibold text-slate-900">{version}</span>
+            </div>
+            <div className="mt-4 rounded-2xl bg-white p-4 text-sm text-slate-500">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="font-semibold text-slate-900">自动更新</div>
+                  <div data-testid="settings-update-status" className="mt-1 text-sm text-slate-500">{updateStatus}</div>
+                </div>
+                <Button
+                  data-testid="settings-check-update"
+                  variant="outline"
+                  className="rounded-2xl"
+                  onClick={() => void handleCheckUpdate(false)}
+                  disabled={isCheckingUpdate}
+                >
+                  <RefreshCcw size={16} className="mr-2" />
+                  {isCheckingUpdate ? '检查中' : '检查更新'}
+                </Button>
               </div>
-            </TabsContent>
-          </div>
-        </Tabs>
+              {availableUpdateVersion && (
+                <div className="mt-4 rounded-2xl bg-slate-50 p-4">
+                  <div className="text-sm font-semibold text-slate-900">可更新到 {availableUpdateVersion}</div>
+                  {updateNotes && (
+                    <div data-testid="settings-update-notes" className="mt-2 whitespace-pre-wrap text-xs leading-6 text-slate-500">
+                      {updateNotes}
+                    </div>
+                  )}
+                  <Button
+                    data-testid="settings-install-update"
+                    className="mt-4 rounded-2xl"
+                    onClick={() => void handleInstallUpdate()}
+                    disabled={isInstallingUpdate}
+                  >
+                    {isInstallingUpdate ? '安装中...' : '下载并安装'}
+                  </Button>
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
       </DialogContent>
     </Dialog>
   );

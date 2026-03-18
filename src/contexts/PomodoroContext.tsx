@@ -1,17 +1,18 @@
 /* eslint-disable react-refresh/only-export-components */
-import React, { createContext, useCallback, useContext, useMemo, useState, useEffect } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { format } from 'date-fns';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useAppStore } from '../stores/useAppStore';
-import { PomodoroSettings, PomodoroMode } from '../types';
+import { PomodoroMode, PomodoroSettings } from '../types';
 
-type PomodoroState = {
+type NativePomodoroState = {
   time_left: number;
   is_active: boolean;
   mode: string;
   sessions_completed: number;
   last_date: string;
+  current_task?: string | null;
   settings: {
     work_duration: number;
     short_break_duration: number;
@@ -32,94 +33,187 @@ type PomodoroContextValue = {
   isActive: boolean;
   mode: PomodoroMode;
   sessionsCompleted: number;
+  currentTaskName: string | null;
   toggleTimer: () => void;
   resetTimer: () => void;
   skipMode: () => void;
 };
 
 const PomodoroContext = createContext<PomodoroContextValue | null>(null);
+const isTauriRuntime = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+
+const playAudio = (file: string) => {
+  const audio = new Audio(file);
+  audio.play().catch(() => undefined);
+};
 
 export const PomodoroProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { pomodoroSettings: localSettings, updatePomodoroSettings: updateStore, logPomodoroSession } = useAppStore();
-  const [state, setState] = useState<PomodoroState | null>(null);
-  const syncSessionsFromState = useCallback((nextState: PomodoroState | null) => {
+  const {
+    pomodoroSettings: localSettings,
+    updatePomodoroSettings: updateStoreSettings,
+    logPomodoroSession,
+    currentTaskId,
+    tasks,
+  } = useAppStore();
+  const [state, setState] = useState<NativePomodoroState | null>(null);
+
+  const buildFallbackState = useCallback((settings: PomodoroSettings, currentTask?: string | null): NativePomodoroState => ({
+    time_left: settings.workDuration * 60,
+    is_active: false,
+    mode: 'work',
+    sessions_completed: 0,
+    last_date: format(new Date(), 'yyyy-MM-dd'),
+    current_task: currentTask || null,
+    settings: {
+      work_duration: settings.workDuration,
+      short_break_duration: settings.shortBreakDuration,
+      long_break_duration: settings.longBreakDuration,
+      long_break_interval: settings.longBreakInterval,
+      auto_start_breaks: settings.autoStartBreaks,
+      auto_start_pomodoros: settings.autoStartPomodoros,
+      max_sessions: settings.maxSessions,
+      stop_after_sessions: settings.stopAfterSessions,
+      stop_after_long_break: settings.stopAfterLongBreak,
+    },
+  }), []);
+
+  const nextModeAfterSkip = useCallback((current: NativePomodoroState): NativePomodoroState => {
+    if (current.mode === 'work') {
+      const nextSessions = current.sessions_completed + 1;
+      const isLongBreak = nextSessions > 0 && nextSessions % current.settings.long_break_interval === 0;
+      return {
+        ...current,
+        mode: isLongBreak ? 'longBreak' : 'shortBreak',
+        time_left: (isLongBreak ? current.settings.long_break_duration : current.settings.short_break_duration) * 60,
+        is_active: false,
+        sessions_completed: nextSessions,
+      };
+    }
+
+    return {
+      ...current,
+      mode: 'work',
+      time_left: current.settings.work_duration * 60,
+      is_active: false,
+    };
+  }, []);
+
+  useEffect(() => {
+    const currentTask = currentTaskId ? tasks.find((task) => task.id === currentTaskId) : null;
+    setState((current) => current ? { ...current, current_task: currentTask?.title || null } : current);
+    invoke('update_task_name', { name: currentTask?.title || null }).catch(() => undefined);
+  }, [currentTaskId, tasks]);
+
+  const syncCompletedSessions = useCallback((nextState: NativePomodoroState | null) => {
     if (!nextState) return;
     const dateKey = nextState.last_date || format(new Date(), 'yyyy-MM-dd');
-    const { pomodoroHistory } = useAppStore.getState();
-    const loggedSessions = pomodoroHistory[dateKey]?.sessions || 0;
+    const loggedSessions = useAppStore.getState().pomodoroHistory[dateKey]?.sessions || 0;
     const delta = nextState.sessions_completed - loggedSessions;
     if (delta <= 0) return;
-    for (let i = 0; i < delta; i += 1) {
-      logPomodoroSession(dateKey, nextState.settings.work_duration);
+
+    const taskId = useAppStore.getState().currentTaskId || undefined;
+    for (let index = 0; index < delta; index += 1) {
+      logPomodoroSession(dateKey, nextState.settings.work_duration, taskId, true);
     }
   }, [logPomodoroSession]);
 
   useEffect(() => {
-    invoke<PomodoroState>('get_pomodoro_state').then(s => {
-      setState(s);
-      syncSessionsFromState(s);
-    });
+    invoke<NativePomodoroState>('get_pomodoro_state')
+      .then((value) => {
+        setState(value);
+        syncCompletedSessions(value);
+      })
+      .catch(() => {
+        setState((current) => current || buildFallbackState(localSettings, useAppStore.getState().currentTaskId ? useAppStore.getState().tasks.find((task) => task.id === useAppStore.getState().currentTaskId)?.title : null));
+      });
 
-    const unlisten = listen<PomodoroState>('pomodoro_tick', (event) => {
+    const unlistenTick = listen<NativePomodoroState>('pomodoro_tick', (event) => {
       setState(event.payload);
-      syncSessionsFromState(event.payload);
+      syncCompletedSessions(event.payload);
+    });
+    const unlistenCompleted = listen('pomodoro_completed', () => {
+      if (useAppStore.getState().pomodoroSettings.playSound) playAudio('/sounds/complete.mp3');
+    });
+    const unlistenBreak = listen('break_completed', () => {
+      if (useAppStore.getState().pomodoroSettings.playSound) playAudio('/sounds/start.mp3');
     });
 
     return () => {
-      unlisten.then(f => f());
+      unlistenTick.then((fn) => fn());
+      unlistenCompleted.then((fn) => fn());
+      unlistenBreak.then((fn) => fn());
     };
-  }, [logPomodoroSession, syncSessionsFromState]);
-
-  const toggleTimer = useCallback(() => invoke('toggle_timer'), []);
-  const resetTimer = useCallback(() => invoke('reset_timer'), []);
-  const skipMode = useCallback(() => invoke('skip_mode'), []);
+  }, [buildFallbackState, localSettings, syncCompletedSessions]);
 
   const updatePomodoroSettings = useCallback((settings: Partial<PomodoroSettings>) => {
-    // 1. 获取最新合并后的设置
-    const { pomodoroSettings: currentLocal } = useAppStore.getState();
-    const newSettings = { ...currentLocal, ...settings };
-    
-    // 2. 同步到 Store
-    updateStore(settings);
+    const merged = { ...useAppStore.getState().pomodoroSettings, ...settings };
+    updateStoreSettings(settings);
 
-    // 3. 关键：同步到 Rust 后端（必须包含所有 snake_case 字段）
-    invoke('update_settings', { settings: {
-      work_duration: newSettings.workDuration,
-      short_break_duration: newSettings.shortBreakDuration,
-      long_break_duration: newSettings.longBreakDuration,
-      long_break_interval: newSettings.longBreakInterval,
-      auto_start_breaks: newSettings.autoStartBreaks,
-      auto_start_pomodoros: newSettings.autoStartPomodoros,
-      max_sessions: newSettings.maxSessions,
-      stop_after_sessions: newSettings.stopAfterSessions || 0,
-      stop_after_long_break: newSettings.stopAfterLongBreak || false,
-    }}).catch(console.error);
-  }, [updateStore]);
+    invoke('update_settings', {
+      settings: {
+        work_duration: merged.workDuration,
+        short_break_duration: merged.shortBreakDuration,
+        long_break_duration: merged.longBreakDuration,
+        long_break_interval: merged.longBreakInterval,
+        auto_start_breaks: merged.autoStartBreaks,
+        auto_start_pomodoros: merged.autoStartPomodoros,
+        max_sessions: merged.maxSessions,
+        stop_after_sessions: merged.stopAfterSessions,
+        stop_after_long_break: merged.stopAfterLongBreak,
+      },
+    }).catch(() => undefined);
+  }, [updateStoreSettings]);
 
-  const value = useMemo(() => {
-    const s = state;
-    return {
-      pomodoroSettings: s?.settings ? {
-        workDuration: s.settings.work_duration,
-        shortBreakDuration: s.settings.short_break_duration,
-        longBreakDuration: s.settings.long_break_duration,
-        longBreakInterval: s.settings.long_break_interval,
-        autoStartBreaks: s.settings.auto_start_breaks,
-        autoStartPomodoros: s.settings.auto_start_pomodoros,
-        maxSessions: s.settings.max_sessions,
-        stopAfterSessions: s.settings.stop_after_sessions,
-        stopAfterLongBreak: s.settings.stop_after_long_break,
-      } : { ...localSettings },
-      updatePomodoroSettings,
-      timeLeft: s?.time_left ?? (localSettings.workDuration * 60),
-      isActive: s?.is_active ?? false,
-      mode: (s?.mode as PomodoroMode) ?? 'work',
-      sessionsCompleted: s?.sessions_completed ?? 0,
-      toggleTimer,
-      resetTimer,
-      skipMode,
-    };
-  }, [state, localSettings, toggleTimer, resetTimer, skipMode, updatePomodoroSettings]);
+  const value = useMemo<PomodoroContextValue>(() => ({
+    pomodoroSettings: state?.settings
+      ? {
+          workDuration: state.settings.work_duration,
+          shortBreakDuration: state.settings.short_break_duration,
+          longBreakDuration: state.settings.long_break_duration,
+          longBreakInterval: state.settings.long_break_interval,
+          autoStartBreaks: state.settings.auto_start_breaks,
+          autoStartPomodoros: state.settings.auto_start_pomodoros,
+          maxSessions: state.settings.max_sessions,
+          stopAfterSessions: state.settings.stop_after_sessions,
+          stopAfterLongBreak: state.settings.stop_after_long_break,
+          playSound: localSettings.playSound,
+        }
+      : localSettings,
+    updatePomodoroSettings,
+    timeLeft: state?.time_left ?? localSettings.workDuration * 60,
+    isActive: state?.is_active ?? false,
+    mode: (state?.mode as PomodoroMode) || 'work',
+    sessionsCompleted: state?.sessions_completed ?? 0,
+    currentTaskName: state?.current_task ?? null,
+    toggleTimer: () => {
+      if (!isTauriRuntime()) {
+        setState((current) => {
+          const next = current || buildFallbackState(useAppStore.getState().pomodoroSettings, useAppStore.getState().tasks.find((task) => task.id === useAppStore.getState().currentTaskId)?.title);
+          return { ...next, is_active: !next.is_active };
+        });
+        return;
+      }
+      invoke('toggle_timer').catch(() => undefined);
+    },
+    resetTimer: () => {
+      if (!isTauriRuntime()) {
+        setState((current) => {
+          const next = current || buildFallbackState(useAppStore.getState().pomodoroSettings, useAppStore.getState().tasks.find((task) => task.id === useAppStore.getState().currentTaskId)?.title);
+          const duration = next.mode === 'shortBreak' ? next.settings.short_break_duration : next.mode === 'longBreak' ? next.settings.long_break_duration : next.settings.work_duration;
+          return { ...next, is_active: false, time_left: duration * 60 };
+        });
+        return;
+      }
+      invoke('reset_timer').catch(() => undefined);
+    },
+    skipMode: () => {
+      if (!isTauriRuntime()) {
+        setState((current) => nextModeAfterSkip(current || buildFallbackState(useAppStore.getState().pomodoroSettings, useAppStore.getState().tasks.find((task) => task.id === useAppStore.getState().currentTaskId)?.title)));
+        return;
+      }
+      invoke('skip_mode').catch(() => undefined);
+    },
+  }), [buildFallbackState, localSettings, nextModeAfterSkip, state, updatePomodoroSettings]);
 
   return <PomodoroContext.Provider value={value}>{children}</PomodoroContext.Provider>;
 };

@@ -17,6 +17,9 @@ dist
 dist-electron
 dist-ssr
 release
+.test-dist
+test-results
+playwright-report
 
 # Rust/Tauri
 src-tauri/target

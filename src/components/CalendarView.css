@@ -1,51 +1,61 @@
-/* 优化 FullCalendar 样式 */
-.fc {
-  --fc-border-color: #f1f5f9;
-  --fc-today-bg-color: #f8fafc;
-  --fc-event-bg-color: #0f766e;
-  --fc-event-border-color: #0f766e;
+.calendar-shell .fc {
+  --fc-border-color: #e2e8f0;
+  --fc-page-bg-color: transparent;
+  --fc-neutral-bg-color: #f8fafc;
+  --fc-now-indicator-color: #0f766e;
+  --fc-today-bg-color: rgba(15, 118, 110, 0.08);
   font-family: inherit;
 }
 
-/* 缩小事件条的高度和边距 */
-.fc-daygrid-event {
-  margin-top: 1px !important;
-  margin-bottom: 1px !important;
-  padding: 1px 4px !important;
-  border-radius: 4px !important;
-  font-size: 0.7rem !important;
-  min-height: 18px !important;
-  border: none !important;
+.calendar-shell .fc .fc-scrollgrid,
+.calendar-shell .fc .fc-theme-standard td,
+.calendar-shell .fc .fc-theme-standard th {
+  border-color: #e2e8f0;
 }
 
-.fc-v-event {
-  border-radius: 6px !important;
-  padding: 2px !important;
+.calendar-shell .fc .fc-col-header-cell {
+  background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
 }
 
-.fc-theme-standard td, .fc-theme-standard th {
-  border: 1px solid #f1f5f9;
-}
-
-.fc .fc-scrollgrid { border: none; }
-
-.fc .fc-col-header-cell-cushion {
-  font-size: 0.7rem;
+.calendar-shell .fc .fc-col-header-cell-cushion {
+  padding: 12px 6px;
+  font-size: 0.75rem;
   font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 8px 4px;
+  letter-spacing: 0.08em;
+  color: #64748b;
+}
+
+.calendar-shell .fc .fc-timegrid-slot {
+  height: 3.2em;
+}
+
+.calendar-shell .fc .fc-timegrid-axis-cushion,
+.calendar-shell .fc .fc-timegrid-slot-label-cushion {
+  font-size: 0.75rem;
   color: #94a3b8;
 }
 
-.task-completed {
-  opacity: 0.4;
-  text-decoration: line-through;
+.calendar-shell .fc .fc-daygrid-day-number {
+  padding: 10px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #0f172a;
 }
 
-.fc-header-toolbar { display: none; }
+.calendar-shell .fc .fc-daygrid-event,
+.calendar-shell .fc .fc-timegrid-event {
+  border-radius: 14px;
+  border-left-width: 4px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
 
-.fc .fc-timegrid-slot { height: 2.5em; }
+.calendar-shell .fc .fc-list-event:hover td,
+.calendar-shell .fc .fc-daygrid-day:hover,
+.calendar-shell .fc .fc-timegrid-col:hover {
+  background: rgba(15, 118, 110, 0.04);
+}
 
-/* 隐藏滚动条但保留功能 */
-.no-scrollbar::-webkit-scrollbar { display: none; }
+.calendar-shell .fc .task-completed {
+  opacity: 0.45;
+  text-decoration: line-through;
+}

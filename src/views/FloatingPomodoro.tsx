@@ -1,231 +1,497 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Pause, Pin, PinOff, Play, RotateCcw, SquareArrowOutUpRight, FastForward, Maximize2, Minimize2 } from 'lucide-react';
-import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window';
+import { useEffect, useMemo, useState } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { EyeOff, FastForward, Pause, Play, RotateCcw, PanelTop } from 'lucide-react';
 import { usePomodoro } from '../contexts/PomodoroContext';
+import { useHoldAction } from '../hooks/useHoldAction';
 import { useAppStore } from '../stores/useAppStore';
-import { cn } from '../utils/cn';
-import { getOngoingTask } from '../utils/taskActivity';
+import { FloatingMode, normalizeFloatingSize, readFloatingMode, readFloatingSize, writeFloatingMode, writeFloatingSize } from '../utils/floatingWindow';
 
-const getWin = () => { try { return getCurrentWindow(); } catch (e) { return null; } };
+type FloatingTheme = 'mist' | 'sage' | 'graphite';
+type LegacyFloatingTheme = 'teal' | 'slate' | 'sunset';
+type MenuState = { x: number; y: number } | null;
 
-const FloatingPomodoro: React.FC = () => {
-  const { timeLeft, isActive, mode, toggleTimer, resetTimer, skipMode, pomodoroSettings } = usePomodoro();
-  const { isPomodoroMiniPlayer, setIsPomodoroMiniPlayer, tasks } = useAppStore();
-  const [alwaysOnTop, setAlwaysOnTop] = useState(true);
-  const [now, setNow] = useState(() => new Date());
-  const [showTask, setShowTask] = useState(false);
-  
-  const [isPressingSkip, setIsPressingSkip] = useState(false);
-  const skipTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+type FloatingPreferences = {
+  theme?: FloatingTheme | LegacyFloatingTheme;
+  opacity?: number;
+};
+
+const storeKeys = ['daily-planner-storage-v7', 'daily-planner-storage-v6', 'daily-planner-storage-v5', 'daily-planner-storage', 'zustand'];
+
+const themeStyles: Record<FloatingTheme, { button: string; text: string; subtle: string }> = {
+  mist: {
+    button: 'border-slate-200 bg-white/85 text-slate-600 hover:border-slate-300 hover:bg-white',
+    text: 'text-slate-900',
+    subtle: 'text-slate-500',
+  },
+  sage: {
+    button: 'border-emerald-200 bg-white/78 text-slate-700 hover:bg-white',
+    text: 'text-slate-900',
+    subtle: 'text-emerald-800/70',
+  },
+  graphite: {
+    button: 'border-slate-300 bg-white/82 text-slate-700 hover:bg-white',
+    text: 'text-slate-900',
+    subtle: 'text-slate-600',
+  },
+};
+
+const modePalette = {
+  work: {
+    standard: 'linear-gradient(180deg, rgba(236,253,245,0.98) 0%, rgba(209,250,229,0.98) 100%)',
+    mini: 'linear-gradient(180deg, rgba(240,253,250,0.98) 0%, rgba(204,251,241,0.98) 100%)',
+    border: '#6ee7b7',
+    accent: '#0f766e',
+  },
+  shortBreak: {
+    standard: 'linear-gradient(180deg, rgba(255,247,237,0.98) 0%, rgba(254,215,170,0.98) 100%)',
+    mini: 'linear-gradient(180deg, rgba(255,251,235,0.98) 0%, rgba(253,230,138,0.98) 100%)',
+    border: '#fbbf24',
+    accent: '#d97706',
+  },
+  longBreak: {
+    standard: 'linear-gradient(180deg, rgba(245,243,255,0.98) 0%, rgba(221,214,254,0.98) 100%)',
+    mini: 'linear-gradient(180deg, rgba(245,243,255,0.98) 0%, rgba(196,181,253,0.98) 100%)',
+    border: '#a78bfa',
+    accent: '#7c3aed',
+  },
+} as const;
+
+const isTauriWindowAvailable = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+
+const normalizeTheme = (theme?: FloatingPreferences['theme']): FloatingTheme => {
+  switch (theme) {
+    case 'mist':
+    case 'sage':
+    case 'graphite':
+      return theme;
+    case 'teal':
+      return 'sage';
+    case 'slate':
+      return 'graphite';
+    case 'sunset':
+      return 'mist';
+    default:
+      return 'mist';
+  }
+};
+
+const normalizeOpacity = (opacity?: number) => {
+  if (typeof opacity !== 'number' || Number.isNaN(opacity)) return 0.96;
+  return Math.min(1, Math.max(0.45, opacity));
+};
+
+const readPreferences = (): { theme: FloatingTheme; opacity: number } => {
+  const raw = localStorage.getItem('floating-pomodoro-preferences');
+  if (!raw) return { theme: 'mist', opacity: 0.96 };
+
+  try {
+    const parsed = JSON.parse(raw) as FloatingPreferences;
+    return {
+      theme: normalizeTheme(parsed.theme),
+      opacity: normalizeOpacity(parsed.opacity),
+    };
+  } catch {
+    return { theme: 'mist', opacity: 0.96 };
+  }
+};
+
+const readBoundTaskNameFromStorage = () => {
+  for (const key of storeKeys) {
+    const raw = localStorage.getItem(key);
+    if (!raw) continue;
+
+    try {
+      const parsed = JSON.parse(raw) as { state?: { currentTaskId?: string | null; tasks?: Array<{ id: string; title: string }> } };
+      const persisted = parsed.state;
+      const currentTaskId = persisted?.currentTaskId;
+      const title = persisted?.tasks?.find((task) => task.id === currentTaskId)?.title;
+      if (title) return title;
+    } catch {
+      // Ignore malformed persisted snapshots.
+    }
+  }
+
+  return null;
+};
+
+const buildHoldRing = (progress: number, color: string) =>
+  `conic-gradient(${color} ${progress * 360}deg, rgba(255,255,255,0.34) 0deg)`;
+
+const FloatingPomodoro = () => {
+  const { timeLeft, isActive, mode, toggleTimer, resetTimer, skipMode, currentTaskName } = usePomodoro();
+  const { tasks, currentTaskId } = useAppStore();
+  const currentTask = tasks.find((task) => task.id === currentTaskId);
+  const initialPreferences = readPreferences();
+  const initialMode = (() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('mode') === 'mini' ? 'mini' : readFloatingMode();
+  })();
+
+  const appWindow = useMemo(() => (isTauriWindowAvailable() ? getCurrentWindow() : null), []);
+  const [theme, setTheme] = useState<FloatingTheme>(initialPreferences.theme);
+  const [opacity, setOpacity] = useState(initialPreferences.opacity);
+  const [floatingMode, setFloatingMode] = useState<FloatingMode>(initialMode);
+  const [menu, setMenu] = useState<MenuState>(null);
+  const [frame, setFrame] = useState({ width: window.innerWidth, height: window.innerHeight });
+  const [boundTaskName, setBoundTaskName] = useState<string | null>(readBoundTaskNameFromStorage());
+
+  const minutes = Math.floor(timeLeft / 60).toString().padStart(2, '0');
+  const seconds = (timeLeft % 60).toString().padStart(2, '0');
+  const styles = themeStyles[theme];
+  const palette = modePalette[mode];
+  const displayTaskName = currentTaskName || currentTask?.title || boundTaskName || '未绑定任务';
+  const holdSkip = useHoldAction({ onComplete: skipMode });
 
   useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 30000);
-    return () => clearInterval(timer);
+    localStorage.setItem('floating-pomodoro-preferences', JSON.stringify({ theme, opacity }));
+  }, [theme, opacity]);
+
+  useEffect(() => {
+    writeFloatingMode(floatingMode);
+  }, [floatingMode]);
+
+  useEffect(() => {
+    const syncPreferences = () => {
+      const next = readPreferences();
+      setTheme(next.theme);
+      setOpacity(next.opacity);
+    };
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === 'floating-pomodoro-preferences') {
+        syncPreferences();
+      }
+      if (!event.key || event.key.startsWith('daily-planner-storage') || event.key === 'zustand') {
+        setBoundTaskName(readBoundTaskNameFromStorage());
+      }
+    };
+
+    const onModeChanged = (event: Event) => {
+      const detail = (event as CustomEvent<FloatingMode>).detail;
+      setFloatingMode(detail === 'mini' ? 'mini' : 'standard');
+    };
+
+    window.addEventListener('storage', onStorage);
+    window.addEventListener('floating-preferences-changed', syncPreferences as EventListener);
+    window.addEventListener('floating-mode-changed', onModeChanged as EventListener);
+    setBoundTaskName(readBoundTaskNameFromStorage());
+
+    let unlistenPromise: Promise<() => void> | null = null;
+    if (isTauriWindowAvailable()) {
+      unlistenPromise = listen<{ theme?: string; opacity?: number }>('floating_preferences_changed', (event) => {
+        setTheme(normalizeTheme(event.payload.theme as FloatingPreferences['theme']));
+        setOpacity(normalizeOpacity(event.payload.opacity));
+      });
+    }
+
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('floating-preferences-changed', syncPreferences as EventListener);
+      window.removeEventListener('floating-mode-changed', onModeChanged as EventListener);
+      unlistenPromise?.then((unlisten) => unlisten()).catch(() => undefined);
+    };
   }, []);
 
-  const activeTask = useMemo(() => getOngoingTask(tasks, now), [tasks, now]);
-  const activeTaskId = activeTask?.id;
-
   useEffect(() => {
-    if (!activeTaskId) {
-      setShowTask(false);
-      return;
-    }
-    setShowTask(false);
-    const carousel = setInterval(() => setShowTask(prev => !prev), 5000);
-    return () => clearInterval(carousel);
-  }, [activeTaskId]);
+    let active = true;
 
-  useEffect(() => {
-    // 迷你条高度微调为 46px 以适应边框对齐
-    const size = isPomodoroMiniPlayer ? { width: 160, height: 46 } : { width: 220, height: 220 };
-    getWin()?.setSize(new LogicalSize(size.width, size.height));
-  }, [isPomodoroMiniPlayer]);
-
-  const handleTogglePin = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const next = !alwaysOnTop;
-    const win = getWin();
-    if (win) {
-      await win.setAlwaysOnTop(next);
-      setAlwaysOnTop(next);
-    }
-  };
-
-  const handleDrag = async (event: React.PointerEvent) => {
-    if (event.button !== 0) return;
-    const target = event.target as HTMLElement;
-    if (target.closest('button') || target.closest('input')) return;
-    
-    try {
-      const win = getWin();
-      if (win) {
-        await win.startDragging();
+    const syncFrame = async () => {
+      if (!appWindow) {
+        const next = normalizeFloatingSize(floatingMode, { width: window.innerWidth, height: window.innerHeight });
+        setFrame(next);
+        writeFloatingSize(floatingMode, next);
+        return;
       }
-    } catch (e) {
-      console.error("Failed to start dragging", e);
+
+      try {
+        const size = await appWindow.innerSize();
+        if (active) {
+          const next = normalizeFloatingSize(floatingMode, { width: size.width, height: size.height });
+          setFrame(next);
+          writeFloatingSize(floatingMode, next);
+        }
+      } catch {
+        // Ignore window size sync failures.
+      }
+    };
+
+    syncFrame();
+
+    if (!appWindow) {
+      const onResize = () => {
+        const next = normalizeFloatingSize(floatingMode, { width: window.innerWidth, height: window.innerHeight });
+        setFrame(next);
+        writeFloatingSize(floatingMode, next);
+      };
+      window.addEventListener('resize', onResize);
+      return () => window.removeEventListener('resize', onResize);
     }
+
+    const unlistenPromise = appWindow.onResized(({ payload }) => {
+      const next = normalizeFloatingSize(floatingMode, { width: payload.width, height: payload.height });
+      setFrame(next);
+      writeFloatingSize(floatingMode, next);
+    });
+
+    return () => {
+      active = false;
+      unlistenPromise.then((unlisten) => unlisten()).catch(() => undefined);
+    };
+  }, [appWindow, floatingMode]);
+
+  const compact = floatingMode === 'mini' || frame.width < 276 || frame.height < 86;
+  const timerClass = compact ? 'text-[28px]' : frame.width < 320 || frame.height < 176 ? 'text-[42px]' : 'text-[48px]';
+
+  const closeFloating = () => {
+    if (!appWindow) return;
+    appWindow.close().catch(() => undefined);
   };
 
-  const startSkipPress = (e: React.PointerEvent) => {
-    e.stopPropagation();
-    setIsPressingSkip(true);
-    skipTimerRef.current = setTimeout(() => { 
-      skipMode(); 
-      setIsPressingSkip(false); 
-    }, 1500);
+  const switchMode = (nextMode: FloatingMode) => {
+    setFloatingMode(nextMode);
+    if (!appWindow) return;
+    const nextSize = readFloatingSize(nextMode);
+    invoke('open_floating_mode', { mode: nextMode, width: nextSize.width, height: nextSize.height }).catch(() => undefined);
   };
 
-  const cancelSkipPress = () => {
-    setIsPressingSkip(false);
-    if (skipTimerRef.current) clearTimeout(skipTimerRef.current);
-  };
+  const menuPosition = (menuState: MenuState, menuWidth: number, menuHeight: number) => ({
+    left: Math.max(8, Math.min((menuState?.x || 8), window.innerWidth - menuWidth - 8)),
+    top: Math.max(8, Math.min((menuState?.y || 8), window.innerHeight - menuHeight - 8)),
+  });
 
-  const minutes = Math.floor(timeLeft / 60);
-  const seconds = timeLeft % 60;
-  const timeText = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-  const ringColor = mode === 'work' ? '#0f766e' : '#f97316';
-
-  if (isPomodoroMiniPlayer) {
-    // 对应 160x46 的路径，顺时针一圈
-    const pathData = "M 80 1 L 159 1 L 159 45 L 1 45 L 1 1 L 80 1";
-    const pathLength = 412;
-
+  if (compact) {
     return (
-      <div 
-        className="fixed inset-0 w-screen h-screen select-none bg-white flex items-center overflow-hidden"
-        onPointerDown={handleDrag}
+      <div
+        data-testid="floating-shell"
+        data-theme={theme}
+        className="h-screen w-screen overflow-visible bg-[#eef3f8]"
+        style={{ opacity }}
+        onClick={() => setMenu(null)}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          setMenu({ x: event.clientX, y: event.clientY });
+        }}
       >
-        {/* 外边框 */}
-        <div className="absolute inset-0 border border-slate-200 pointer-events-none" />
-
-        {/* 环绕进度条 SVG - 置于顶层 */}
-        <svg className="absolute inset-0 w-full h-full pointer-events-none z-30" viewBox="0 0 160 46" preserveAspectRatio="none">
-          <path
-            d={pathData}
-            fill="none"
-            stroke={ringColor}
-            strokeWidth="2"
-            className={cn(
-              "transition-all ease-linear",
-              isPressingSkip ? "duration-[1500ms] opacity-100" : "duration-150 opacity-0"
-            )}
-            style={{
-              strokeDasharray: pathLength,
-              strokeDashoffset: isPressingSkip ? 0 : pathLength
-            }}
-          />
-        </svg>
-
-        {/* 内容区域 */}
-        <div className="relative z-10 flex w-full items-center justify-between px-3 h-full">
-          <div className="flex items-center gap-2">
-            <button onClick={(e) => { e.stopPropagation(); toggleTimer(); }} className="p-1 text-slate-600 hover:text-primary transition-colors cursor-pointer active:scale-90 flex items-center justify-center">
-              {isActive ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
-            </button>
-            <div className="relative h-4 w-[86px] overflow-hidden">
-              <div className={cn(
-                "absolute inset-0 flex items-center transition-all duration-500",
-                showTask && activeTask ? "opacity-0 -translate-y-2" : "opacity-100 translate-y-0"
-              )}>
-                <div className="text-sm font-black tabular-nums text-slate-800 tracking-tight leading-none">{timeText}</div>
-              </div>
-              {activeTask && (
-                <div className={cn(
-                  "absolute inset-0 flex items-center transition-all duration-500",
-                  showTask ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2"
-                )}>
-                  <div className="text-[10px] font-black text-slate-600 truncate" title={activeTask.title}>
-                    {activeTask.title}
-                  </div>
-                </div>
-              )}
-            </div>
+        <div
+          data-testid="floating-frame"
+          className="flex h-full w-full items-center gap-2 border px-3 py-2 shadow-[0_10px_24px_rgba(15,23,42,0.12)]"
+          style={{ background: palette.mini, borderColor: palette.border }}
+        >
+          <div
+            data-testid="floating-drag-handle"
+            className="min-w-0 flex-1 cursor-grab active:cursor-grabbing"
+            onMouseDown={() => appWindow?.startDragging().catch(() => undefined)}
+          >
+            <div className={`text-[9px] font-semibold uppercase tracking-[0.24em] ${styles.subtle}`}>{mode === 'work' ? '专注中' : '休息中'}</div>
+            <div className={`truncate text-[11px] font-semibold ${styles.text}`}>{displayTaskName}</div>
           </div>
-          <div className="flex items-center gap-1.5">
-            <button 
-              onPointerDown={startSkipPress} 
-              onPointerUp={cancelSkipPress} 
-              onPointerLeave={cancelSkipPress} 
-              className={cn("p-1 transition-colors cursor-pointer active:scale-90 flex items-center justify-center", isPressingSkip ? "text-primary" : "text-slate-400 hover:text-slate-600")}
-            >
-              <FastForward size={14} />
-            </button>
-            <button onClick={(e) => { e.stopPropagation(); setIsPomodoroMiniPlayer(false); }} className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer active:scale-90 flex items-center justify-center">
-              <Maximize2 size={14} />
-            </button>
+
+          <div data-testid="floating-timer" className={`shrink-0 font-black leading-none tracking-[-0.06em] ${timerClass} ${styles.text}`}>
+            {minutes}:{seconds}
           </div>
+
+          <button
+            type="button"
+            data-testid="floating-toggle"
+            className="flex h-9 w-9 items-center justify-center rounded-full text-white shadow-[0_10px_20px_rgba(15,23,42,0.18)]"
+            style={{ backgroundColor: palette.accent }}
+            onClick={toggleTimer}
+          >
+            {isActive ? <Pause size={16} /> : <Play size={16} className="translate-x-px" />}
+          </button>
+
+          <button
+            type="button"
+            data-testid="floating-skip-hold"
+            className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-white/70 bg-white/70"
+            onMouseDown={holdSkip.start}
+            onMouseUp={holdSkip.cancel}
+            onMouseLeave={holdSkip.cancel}
+            onTouchStart={holdSkip.start}
+            onTouchEnd={holdSkip.cancel}
+            onTouchCancel={holdSkip.cancel}
+          >
+            <div className="absolute inset-0" style={{ background: buildHoldRing(holdSkip.progress, palette.accent) }} />
+            <div className="absolute inset-[3px] rounded-full bg-white/92" />
+            <FastForward size={13} className="relative z-10" style={{ color: palette.accent }} />
+          </button>
+
+          <button
+            type="button"
+            data-testid="floating-standard-switch"
+            className={`flex h-9 w-9 items-center justify-center rounded-full border ${styles.button}`}
+            onClick={() => switchMode('standard')}
+          >
+            <PanelTop size={14} />
+          </button>
         </div>
-        {/* 状态指示线 */}
-        <div className="absolute left-0 top-0 bottom-0 w-1 z-20" style={{ backgroundColor: ringColor }} />
+
+        {menu && (
+          <div
+            className="absolute z-50 min-w-[168px] rounded-2xl border border-slate-200 bg-white p-1.5 shadow-2xl"
+            style={menuPosition(menu, 176, 126)}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="flex w-full items-center rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100"
+              onClick={() => {
+                setMenu(null);
+                switchMode('standard');
+              }}
+            >
+              切换完整悬浮窗
+            </button>
+            <button
+              type="button"
+              className="flex w-full items-center rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100"
+              onClick={() => {
+                setMenu(null);
+                closeFloating();
+              }}
+            >
+              隐藏悬浮窗
+            </button>
+          </div>
+        )}
       </div>
     );
   }
 
   return (
-    <div 
-      className="fixed inset-0 w-screen h-screen p-1 select-none overflow-hidden bg-white border border-slate-200 shadow-xl"
-      onPointerDown={handleDrag}
+    <div
+      data-testid="floating-shell"
+      data-theme={theme}
+      className="h-screen w-screen overflow-visible bg-[#eef3f8]"
+      style={{ opacity }}
+      onClick={() => setMenu(null)}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        setMenu({ x: event.clientX, y: event.clientY });
+      }}
     >
-      <div className="relative h-full w-full flex flex-col items-center justify-between p-4 text-slate-800">
-        <div className="flex w-full items-center justify-between">
-          <span className="text-[10px] uppercase tracking-[0.3em] font-black text-slate-400">Focus Timer</span>
-          <div className="flex items-center gap-1">
-            <button onClick={(e) => { e.stopPropagation(); setIsPomodoroMiniPlayer(true); }} className="p-1.5 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer active:scale-90" title="迷你模式">
-              <Minimize2 size={14} />
-            </button>
-            <button onClick={handleTogglePin} className={cn("p-1.5 transition-colors cursor-pointer active:scale-90", alwaysOnTop ? "text-primary" : "text-slate-400 hover:text-slate-600")}>
-              {alwaysOnTop ? <Pin size={14} /> : <PinOff size={14} />}
-            </button>
-          </div>
-        </div>
-
+      <div
+        data-testid="floating-frame"
+        className="h-full w-full border px-3 py-2 shadow-[0_18px_40px_rgba(15,23,42,0.12)]"
+        style={{ background: palette.standard, borderColor: palette.border }}
+      >
         <div
-          className="relative flex h-[110px] w-[110px] items-center justify-center rounded-full p-[4px]"
-          style={{ background: `conic-gradient(${ringColor} ${Math.round((1 - timeLeft / (mode === 'work' ? pomodoroSettings.workDuration * 60 : (mode === 'shortBreak' ? pomodoroSettings.shortBreakDuration * 60 : pomodoroSettings.longBreakDuration * 60))) * 360)}deg, #f1f5f9 0deg)` }}
+          data-testid="floating-drag-handle"
+          className="flex cursor-grab items-start justify-between gap-2 active:cursor-grabbing"
+          onMouseDown={() => appWindow?.startDragging().catch(() => undefined)}
         >
-          <div className="relative z-10 flex h-full w-full flex-col items-center justify-center rounded-full bg-white shadow-inner overflow-hidden">
-            <div className={cn(
-              "flex flex-col items-center transition-all duration-500",
-              showTask && activeTask ? "opacity-0 -translate-y-2" : "opacity-100 translate-y-0"
-            )}>
-              <div className="text-2xl font-black tabular-nums text-slate-800 tracking-tighter leading-none">{timeText}</div>
-              <div className="mt-1 text-[8px] uppercase tracking-[0.2em] font-bold text-slate-400">{isActive ? (mode === 'work' ? 'Working' : 'Resting') : 'Paused'}</div>
+          <div className="min-w-0">
+            <div className={`text-[9px] font-semibold uppercase tracking-[0.24em] ${styles.subtle}`}>
+              {mode === 'work' ? '专注中' : mode === 'shortBreak' ? '短休息' : '长休息'}
             </div>
-            {activeTask && (
-              <div className={cn(
-                "absolute inset-0 flex flex-col items-center justify-center px-4 text-center transition-all duration-500",
-                showTask ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2"
-              )}>
-                <div className="text-[8px] uppercase tracking-[0.2em] font-black text-primary">Ongoing</div>
-                <div className="mt-1 text-[11px] font-black text-slate-700 line-clamp-2" title={activeTask.title}>
-                  {activeTask.title}
-                </div>
-              </div>
-            )}
+            <div className={`mt-0.5 truncate text-[13px] font-semibold ${styles.text}`}>{displayTaskName}</div>
           </div>
+          <button
+            type="button"
+            data-testid="floating-hide-button"
+            className={`flex h-8 w-8 items-center justify-center rounded-full border ${styles.button}`}
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              closeFloating();
+            }}
+            title="隐藏悬浮窗"
+          >
+            <EyeOff size={14} />
+          </button>
         </div>
 
-        <div className="flex items-center justify-between w-full px-2">
-          <button onClick={(e) => { e.stopPropagation(); resetTimer(); }} className="p-2 text-slate-400 hover:text-slate-600 transition-all active:scale-90 cursor-pointer" title="重置">
-            <RotateCcw size={18} />
-          </button>
-          
-          <button onClick={(e) => { e.stopPropagation(); toggleTimer(); }} className={cn("w-10 h-10 rounded-xl flex items-center justify-center transition-all active:scale-95 cursor-pointer shadow-md", isActive ? "bg-slate-100 text-slate-600" : "bg-primary text-white shadow-primary/20")}>
-            {isActive ? <Pause size={20} fill="currentColor" /> : <Play size={20} className="ml-0.5" fill="currentColor" />}
-          </button>
+        <div data-testid="floating-timer" className={`mt-2 text-center font-black leading-none tracking-[-0.08em] ${timerClass} ${styles.text}`}>
+          {minutes}:{seconds}
+        </div>
 
-          <button onPointerDown={startSkipPress} onPointerUp={cancelSkipPress} onPointerLeave={cancelSkipPress} className={cn("relative overflow-hidden p-2 text-slate-400 hover:text-primary transition-all active:scale-90 cursor-pointer", isPressingSkip && "text-primary scale-110")} title="长按跳过">
-            <FastForward size={18} className="relative z-10" />
-            {isPressingSkip && <div className="absolute inset-0 bg-primary/10 animate-[progress_1.5s_linear] origin-left" />}
+        <div className="mt-2 grid grid-cols-4 gap-2">
+          <button
+            type="button"
+            className={`flex h-9 items-center justify-center rounded-[14px] border ${styles.button}`}
+            onClick={resetTimer}
+          >
+            <RotateCcw size={16} />
           </button>
-          
-          <button onClick={(e) => { e.stopPropagation(); invoke('open_main'); }} className="p-2 text-slate-400 hover:text-slate-600 transition-all active:scale-90 cursor-pointer" title="打开主窗口">
-            <SquareArrowOutUpRight size={18} />
+          <button
+            type="button"
+            data-testid="floating-toggle"
+            className="flex h-9 items-center justify-center rounded-[14px] text-white shadow-[0_10px_20px_rgba(15,23,42,0.18)]"
+            style={{ backgroundColor: palette.accent }}
+            onClick={toggleTimer}
+          >
+            {isActive ? <Pause size={18} /> : <Play size={18} className="translate-x-px" />}
           </button>
+          <button
+            type="button"
+            data-testid="floating-skip-hold"
+            className="relative flex h-9 items-center justify-center overflow-hidden rounded-[14px] border border-white/70 bg-white/70"
+            onMouseDown={holdSkip.start}
+            onMouseUp={holdSkip.cancel}
+            onMouseLeave={holdSkip.cancel}
+            onTouchStart={holdSkip.start}
+            onTouchEnd={holdSkip.cancel}
+            onTouchCancel={holdSkip.cancel}
+          >
+            <div className="absolute inset-0" style={{ background: buildHoldRing(holdSkip.progress, palette.accent) }} />
+            <div className="absolute inset-[3px] rounded-[11px] bg-white/92" />
+            <FastForward size={16} className="relative z-10" style={{ color: palette.accent }} />
+          </button>
+          <button
+            type="button"
+            data-testid="floating-mini-switch"
+            className={`flex h-9 items-center justify-center rounded-[14px] border ${styles.button}`}
+            onClick={() => switchMode('mini')}
+          >
+            <PanelTop size={14} />
+          </button>
+        </div>
+
+        <div className="mt-2 text-center text-[10px] font-medium" style={{ color: palette.accent }}>
+          长按跳过当前阶段
         </div>
       </div>
+
+      {menu && (
+        <div
+          className="absolute z-50 min-w-[168px] rounded-2xl border border-slate-200 bg-white p-1.5 shadow-2xl"
+          style={menuPosition(menu, 176, 162)}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="flex w-full items-center rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100"
+            onClick={() => {
+              setMenu(null);
+              invoke('open_floating_settings').catch(() => undefined);
+            }}
+          >
+            外观设置
+          </button>
+          <button
+            type="button"
+            className="flex w-full items-center rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100"
+            onClick={() => {
+              setMenu(null);
+              switchMode('mini');
+            }}
+          >
+            切换 mini 条
+          </button>
+          <button
+            type="button"
+            className="flex w-full items-center rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100"
+            onClick={() => {
+              setMenu(null);
+              closeFloating();
+            }}
+          >
+            隐藏悬浮窗
+          </button>
+        </div>
+      )}
     </div>
   );
 };

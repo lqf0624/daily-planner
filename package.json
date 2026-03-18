@@ -10,6 +10,8 @@
     "dev:ui": "vite",
     "dev:web": "vite",
     "build": "tsc && vite build",
+    "test:unit": "tsc -p tsconfig.tests.json && node --experimental-specifier-resolution=node --test .test-dist/tests/*.test.js",
+    "test:e2e": "npm run build && playwright test",
     "tauri": "tauri",
     "build:tauri": "tauri build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
@@ -53,6 +55,7 @@
     "zustand": "^5.0.9"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@tailwindcss/postcss": "^4.1.18",
     "@tailwindcss/typography": "^0.5.19",
     "@tauri-apps/cli": "^2.9.6",
