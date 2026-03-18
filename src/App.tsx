@@ -28,11 +28,16 @@ const navItems = [
   { id: 'pomodoro', label: '番茄钟', icon: Timer },
 ] as const;
 
+const LEGACY_IMPORT_MARKER = 'daily-planner-legacy-imported-daily-planner-ai-v1';
+
 const App = () => {
   const {
     tasks,
     weeklyPlans,
     goals,
+    weeklyReports,
+    habits,
+    chatHistory,
     currentTaskId,
     _hasHydrated,
     setCurrentTaskId,
@@ -40,6 +45,7 @@ const App = () => {
     setIsSettingsOpen,
     isAIPanelOpen,
     setIsAIPanelOpen,
+    importData,
   } = useAppStore();
   const [activeTab, setActiveTab] = useState<(typeof navItems)[number]['id']>('today');
   const notifiedRef = useRef<Set<string>>(new Set());
@@ -88,6 +94,43 @@ const App = () => {
     const timer = setInterval(run, 30000);
     return () => clearInterval(timer);
   }, [tasks, view]);
+
+  useEffect(() => {
+    if (view !== 'main' || !_hasHydrated || typeof window === 'undefined' || typeof localStorage === 'undefined') return;
+    if (localStorage.getItem(LEGACY_IMPORT_MARKER)) return;
+
+    const hasCurrentData = (
+      tasks.length > 0
+      || goals.length > 0
+      || weeklyPlans.length > 0
+      || weeklyReports.length > 0
+      || habits.length > 0
+      || chatHistory.length > 0
+    );
+
+    if (hasCurrentData) {
+      localStorage.setItem(LEGACY_IMPORT_MARKER, JSON.stringify({ skippedAt: new Date().toISOString(), reason: 'current-store-not-empty' }));
+      return;
+    }
+
+    let cancelled = false;
+
+    invoke<string | null>('load_legacy_daily_planner_ai_store')
+      .then((payload) => {
+        if (cancelled || !payload) return;
+        const parsed = JSON.parse(payload) as Record<string, unknown>;
+        importData(parsed);
+        localStorage.setItem(LEGACY_IMPORT_MARKER, JSON.stringify({
+          importedAt: new Date().toISOString(),
+          source: 'daily-planner-ai',
+        }));
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [_hasHydrated, chatHistory.length, goals.length, habits.length, importData, tasks.length, view, weeklyPlans.length, weeklyReports.length]);
 
   useEffect(() => {
     if (view !== 'main' || !_hasHydrated) return;

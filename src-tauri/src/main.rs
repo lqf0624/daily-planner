@@ -239,6 +239,114 @@ fn preferred_floating_size(mode: &str, width: Option<f64>, height: Option<f64>) 
   )
 }
 
+fn legacy_daily_planner_ai_dir() -> Option<PathBuf> {
+  std::env::var_os("APPDATA")
+    .map(PathBuf::from)
+    .map(|path| path.join("daily-planner-ai").join("Local Storage").join("leveldb"))
+}
+
+fn extract_utf16_json_after_key(bytes: &[u8], key: &str) -> Option<String> {
+  let key_bytes = key.as_bytes();
+  let key_index = bytes.windows(key_bytes.len()).position(|window| window == key_bytes)?;
+  let search_from = key_index + key_bytes.len();
+
+  let mut json_start = None;
+  let upper_bound = bytes.len().saturating_sub(1);
+  for i in search_from..upper_bound {
+    if bytes[i] == b'{' && bytes[i + 1] == 0 {
+      json_start = Some(i);
+      break;
+    }
+  }
+
+  let mut cursor = json_start?;
+  let mut result = String::new();
+  let mut depth = 0usize;
+  let mut in_string = false;
+  let mut escaped = false;
+
+  while cursor + 1 < bytes.len() {
+    let code_unit = u16::from_le_bytes([bytes[cursor], bytes[cursor + 1]]);
+    cursor += 2;
+
+    let ch = match char::decode_utf16([code_unit]).next() {
+      Some(Ok(ch)) => ch,
+      _ => return None,
+    };
+
+    result.push(ch);
+
+    if escaped {
+      escaped = false;
+      continue;
+    }
+
+    match ch {
+      '\\' if in_string => escaped = true,
+      '"' => in_string = !in_string,
+      '{' if !in_string => depth += 1,
+      '}' if !in_string => {
+        depth = depth.saturating_sub(1);
+        if depth == 0 {
+          return Some(result);
+        }
+      }
+      _ => {}
+    }
+  }
+
+  None
+}
+
+fn read_legacy_daily_planner_ai_store_json() -> Option<String> {
+  let dir = legacy_daily_planner_ai_dir()?;
+  if !dir.exists() {
+    return None;
+  }
+
+  let mut entries = fs::read_dir(dir)
+    .ok()?
+    .filter_map(|entry| entry.ok())
+    .filter(|entry| {
+      entry
+        .path()
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| matches!(ext, "log" | "ldb"))
+        .unwrap_or(false)
+    })
+    .collect::<Vec<_>>();
+
+  entries.sort_by_key(|entry| {
+    (
+      entry
+        .path()
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| if ext == "log" { 0 } else { 1 })
+        .unwrap_or(2),
+      std::cmp::Reverse(
+        entry
+          .metadata()
+          .and_then(|metadata| metadata.modified())
+          .ok(),
+      ),
+    )
+  });
+
+  for entry in entries {
+    let Ok(bytes) = fs::read(entry.path()) else {
+      continue;
+    };
+
+    if let Some(json) = extract_utf16_json_after_key(&bytes, "daily-planner-storage-v5") {
+      return Some(json);
+    }
+  }
+
+  None
+}
+
 #[tauri::command]
 fn open_main(handle: AppHandle) { perform_open_main(&handle); }
 
@@ -418,6 +526,11 @@ fn broadcast_floating_preferences(theme: String, opacity: f64, handle: AppHandle
   }));
 }
 
+#[tauri::command]
+fn load_legacy_daily_planner_ai_store() -> Option<String> {
+  read_legacy_daily_planner_ai_store_json()
+}
+
 fn main() {
   let app = tauri::Builder::default()
     .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -545,7 +658,7 @@ fn main() {
       });
       Ok(())
     })
-    .invoke_handler(tauri::generate_handler![get_pomodoro_state, toggle_timer, reset_timer, skip_mode, update_settings, open_main, show_notification, toggle_floating_window, open_floating_mode, open_floating_settings, get_runtime_platform, broadcast_floating_preferences, update_task_name])
+    .invoke_handler(tauri::generate_handler![get_pomodoro_state, toggle_timer, reset_timer, skip_mode, update_settings, open_main, show_notification, toggle_floating_window, open_floating_mode, open_floating_settings, get_runtime_platform, broadcast_floating_preferences, update_task_name, load_legacy_daily_planner_ai_store])
     .build(tauri::generate_context!())
     .expect("error");
 
@@ -559,7 +672,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-  use super::{format_tray_text, next_mode_after_skip, PomodoroSettings};
+  use super::{extract_utf16_json_after_key, format_tray_text, next_mode_after_skip, PomodoroSettings};
 
   #[test]
   fn skip_mode_moves_work_session_into_short_break_by_default() {
@@ -586,5 +699,28 @@ mod tests {
     assert_eq!(timer_text, "专注: 25:00");
     assert_eq!(task_text, "任务: 深度工作");
     assert_eq!(break_text, "休息: 05:00");
+  }
+
+  #[test]
+  fn extracts_legacy_store_json_from_utf16_bytes() {
+    let json = concat!(
+      "{",
+      "\"state\":{",
+      "\"tasks\":[{\"id\":\"1\",\"title\":\"旧任务\"}]",
+      "},",
+      "\"version\":5",
+      "}"
+    );
+    let mut bytes = b"headerdaily-planner-storage-v5".to_vec();
+    bytes.extend_from_slice(
+      &json
+        .encode_utf16()
+        .flat_map(|unit| unit.to_le_bytes())
+        .collect::<Vec<_>>(),
+    );
+
+    let extracted = extract_utf16_json_after_key(&bytes, "daily-planner-storage-v5").expect("should extract json");
+    assert!(extracted.contains("\"tasks\""));
+    assert!(extracted.contains("旧任务"));
   }
 }
