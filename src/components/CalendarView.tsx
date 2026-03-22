@@ -5,30 +5,20 @@ import interactionPlugin from '@fullcalendar/interaction';
 import type { EventResizeDoneArg } from '@fullcalendar/interaction';
 import listPlugin from '@fullcalendar/list';
 import timeGridPlugin from '@fullcalendar/timegrid';
-import { CalendarApi, DateSelectArg, DatesSetArg, EventClickArg, EventContentArg, EventDropArg, EventInput } from '@fullcalendar/core';
+import { DateSelectArg, DatesSetArg, EventClickArg, EventContentArg, EventDropArg, EventInput } from '@fullcalendar/core';
+import enLocale from '@fullcalendar/core/locales/en-gb';
+import deLocale from '@fullcalendar/core/locales/de';
+import zhLocale from '@fullcalendar/core/locales/zh-cn';
 import { ChevronLeft, ChevronRight, Filter, Flag, Plus, Search, Target } from 'lucide-react';
-import { format, getISOWeek, getISOWeekYear, parseISO } from 'date-fns';
+import { format, parseISO } from 'date-fns';
+import { useI18n } from '../i18n';
 import { useAppStore } from '../stores/useAppStore';
 import { PlannerList, Task, TaskPriority, TaskStatus, WeeklyGoal } from '../types';
+import { getPlannerWeek, getPlannerWeekYear } from '../utils/week';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { Input } from './ui/input';
 import './CalendarView.css';
-
-const priorityOptions: TaskPriority[] = ['high', 'medium', 'low'];
-const statusOptions: TaskStatus[] = ['todo', 'done'];
-const viewOptions = [
-  ['timeGridDay', '日视图'],
-  ['timeGridWeek', '周视图'],
-  ['dayGridMonth', '月视图'],
-  ['listWeek', '列表'],
-] as const;
-
-const priorityLabel: Record<TaskPriority, string> = {
-  high: '高优先级',
-  medium: '中优先级',
-  low: '低优先级',
-};
 
 const priorityClass: Record<TaskPriority, string> = {
   high: 'border-l-rose-500',
@@ -36,13 +26,10 @@ const priorityClass: Record<TaskPriority, string> = {
   low: 'border-l-slate-400',
 };
 
-const statusLabel: Record<TaskStatus, string> = {
-  todo: '待办',
-  done: '已完成',
-  archived: '已归档',
-};
+const priorityOptions: TaskPriority[] = ['high', 'medium', 'low'];
+const statusOptions: TaskStatus[] = ['todo', 'done'];
 
-type CalendarViewMode = typeof viewOptions[number][0];
+type CalendarViewMode = 'timeGridDay' | 'timeGridWeek' | 'dayGridMonth' | 'listWeek';
 
 const toLocalDateTime = (date: Date) => format(date, "yyyy-MM-dd'T'HH:mm:ss");
 const toDateTimeInputValue = (value?: string) => (value ? format(parseISO(value), "yyyy-MM-dd'T'HH:mm") : '');
@@ -73,6 +60,7 @@ const createEmptyTask = (): Task => {
 };
 
 const CalendarView = () => {
+  const { t, locale } = useI18n();
   const {
     tasks,
     lists,
@@ -86,25 +74,46 @@ const CalendarView = () => {
 
   const calendarRef = useRef<FullCalendar>(null);
   const [viewMode, setViewMode] = useState<CalendarViewMode>('timeGridWeek');
-  const [calendarTitle, setCalendarTitle] = useState(() => format(new Date(), 'yyyy年M月'));
+  const [calendarTitle, setCalendarTitle] = useState(() => format(new Date(), 'yyyy-MM'));
   const [query, setQuery] = useState('');
   const [listFilter, setListFilter] = useState<'all' | string>('all');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [draft, setDraft] = useState<Task>(createEmptyTask());
 
-  const syncCalendarState = (calendar: CalendarApi) => {
-    setCalendarTitle(calendar.view.title);
+  const viewOptions = useMemo(() => ([
+    ['timeGridDay', t('calendar.dayView')],
+    ['timeGridWeek', t('calendar.weekView')],
+    ['dayGridMonth', t('calendar.monthView')],
+    ['listWeek', t('calendar.listView')],
+  ] as const), [t]);
+
+  const priorityLabel: Record<TaskPriority, string> = {
+    high: t('priority.high'),
+    medium: t('priority.medium'),
+    low: t('priority.low'),
   };
+
+  const statusLabel: Record<TaskStatus, string> = {
+    todo: t('status.todo'),
+    done: t('status.done'),
+    archived: t('status.archived'),
+  };
+
+  const fullCalendarLocale = locale === 'de' ? deLocale : locale === 'zh-CN' ? zhLocale : enLocale;
 
   useEffect(() => {
     const calendar = calendarRef.current?.getApi();
     if (!calendar) return;
-    calendar.changeView(viewMode);
-    syncCalendarState(calendar);
+    if (viewMode === 'timeGridDay') {
+      calendar.changeView(viewMode, new Date());
+    } else {
+      calendar.changeView(viewMode);
+    }
+    setCalendarTitle(calendar.view.title);
   }, [viewMode]);
 
-  const currentWeekNumber = getISOWeek(new Date());
-  const currentWeekYear = getISOWeekYear(new Date());
+  const currentWeekNumber = getPlannerWeek(new Date());
+  const currentWeekYear = getPlannerWeekYear(new Date());
   const currentWeeklyPlan = weeklyPlans.find((plan) => plan.weekNumber === currentWeekNumber && plan.year === currentWeekYear);
   const weeklyGoalOptions = currentWeeklyPlan?.goals || [];
 
@@ -115,12 +124,14 @@ const CalendarView = () => {
     return task.title.toLowerCase().includes(keyword) || (task.notes || '').toLowerCase().includes(keyword);
   }), [listFilter, query, tasks]);
 
-  const events = useMemo<EventInput[]>(() => filteredTasks.map((task) => {
+  const events = useMemo<EventInput[]>(() => filteredTasks
+    .filter((task) => task.scheduledStart || task.dueAt)
+    .map((task) => {
     const listColor = lists.find((list) => list.id === task.listId)?.color || '#2563eb';
     return {
       id: task.id,
       title: task.title,
-      start: task.scheduledStart,
+      start: task.scheduledStart || task.dueAt,
       end: task.scheduledEnd || task.dueAt,
       allDay: task.allDay,
       backgroundColor: `${listColor}22`,
@@ -130,7 +141,7 @@ const CalendarView = () => {
       extendedProps: {
         priority: task.priority,
         listColor,
-        listName: lists.find((list) => list.id === task.listId)?.name || '收件箱',
+        listName: lists.find((list) => list.id === task.listId)?.name || 'Inbox',
       },
     };
   }), [filteredTasks, lists]);
@@ -143,13 +154,12 @@ const CalendarView = () => {
   };
 
   const toggleLinkedId = (field: 'linkedGoalIds' | 'linkedWeeklyGoalIds', id: string) => {
-    setDraft((current) => {
-      const values = current[field];
-      return {
-        ...current,
-        [field]: values.includes(id) ? values.filter((item) => item !== id) : [...values, id],
-      };
-    });
+    setDraft((current) => ({
+      ...current,
+      [field]: current[field].includes(id)
+        ? current[field].filter((item) => item !== id)
+        : [...current[field], id],
+    }));
   };
 
   const saveDraft = () => {
@@ -185,21 +195,12 @@ const CalendarView = () => {
     setDialogOpen(true);
   };
 
-  const handleDrop = (arg: EventDropArg) => {
-    updateTask(arg.event.id, {
-      scheduledStart: arg.event.start ? toLocalDateTime(arg.event.start) : undefined,
-      scheduledEnd: arg.event.end ? toLocalDateTime(arg.event.end) : undefined,
-      dueAt: arg.event.end ? toLocalDateTime(arg.event.end) : arg.event.start ? toLocalDateTime(arg.event.start) : undefined,
-      allDay: arg.event.allDay,
-    });
-  };
-
-  const handleResize = (arg: EventResizeDoneArg) => {
-    updateTask(arg.event.id, {
-      scheduledStart: arg.event.start ? toLocalDateTime(arg.event.start) : undefined,
-      scheduledEnd: arg.event.end ? toLocalDateTime(arg.event.end) : undefined,
-      dueAt: arg.event.end ? toLocalDateTime(arg.event.end) : arg.event.start ? toLocalDateTime(arg.event.start) : undefined,
-      allDay: arg.event.allDay,
+  const updateCalendarTaskTime = (id: string, start: Date | null, end: Date | null, allDay: boolean) => {
+    updateTask(id, {
+      scheduledStart: start ? toLocalDateTime(start) : undefined,
+      scheduledEnd: end ? toLocalDateTime(end) : undefined,
+      dueAt: end ? toLocalDateTime(end) : start ? toLocalDateTime(start) : undefined,
+      allDay,
     });
   };
 
@@ -246,7 +247,7 @@ const CalendarView = () => {
     if (action === 'prev') calendar.prev();
     if (action === 'next') calendar.next();
     if (action === 'today') calendar.today();
-    syncCalendarState(calendar);
+    setCalendarTitle(calendar.view.title);
   };
 
   return (
@@ -254,13 +255,14 @@ const CalendarView = () => {
       <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h2 className="text-2xl font-black text-slate-900">日历与排程</h2>
-            <p className="mt-2 text-sm text-slate-500">支持日、周、月和列表视图，既能回看过去，也能安排未来。</p>
+            <h2 className="text-2xl font-black text-slate-900">{t('calendar.title')}</h2>
+            <p className="mt-2 text-sm text-slate-500">{t('calendar.desc')}</p>
           </div>
           <div className="flex flex-wrap gap-2">
             {viewOptions.map(([value, label]) => (
               <Button
                 key={value}
+                data-testid={`calendar-view-${value}`}
                 variant={viewMode === value ? 'default' : 'outline'}
                 className="rounded-2xl"
                 onClick={() => setViewMode(value)}
@@ -270,7 +272,7 @@ const CalendarView = () => {
             ))}
             <Button data-testid="calendar-new-task" className="rounded-2xl" onClick={() => openTaskDialog()}>
               <Plus size={16} className="mr-2" />
-              新建任务
+              {t('calendar.newTask')}
             </Button>
           </div>
         </div>
@@ -283,7 +285,7 @@ const CalendarView = () => {
               <ChevronRight size={16} />
             </Button>
             <Button data-testid="calendar-today" variant="outline" className="h-11 rounded-2xl px-4" onClick={() => navigateCalendar('today')}>
-              回到今天
+              {t('calendar.today')}
             </Button>
           </div>
           <div data-testid="calendar-title" className="text-lg font-black text-slate-900">
@@ -298,7 +300,7 @@ const CalendarView = () => {
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               className="h-11 rounded-2xl border-slate-200 bg-slate-50 pl-10"
-              placeholder="搜索任务标题或备注"
+              placeholder={t('calendar.search')}
             />
           </div>
           <div className="relative">
@@ -308,7 +310,7 @@ const CalendarView = () => {
               onChange={(event) => setListFilter(event.target.value)}
               className="h-11 rounded-2xl border border-slate-200 bg-slate-50 pl-10 pr-8 text-sm outline-none"
             >
-              <option value="all">全部分类</option>
+              <option value="all">{t('calendar.allCategories')}</option>
               {lists.map((list) => (
                 <option key={list.id} value={list.id}>{list.name}</option>
               ))}
@@ -327,15 +329,16 @@ const CalendarView = () => {
           editable
           selectable
           nowIndicator
-          locale="zh-cn"
+          locale={fullCalendarLocale}
+          firstDay={1}
           dayMaxEvents={3}
           slotMinTime="06:00:00"
           slotMaxTime="23:00:00"
           events={events}
           eventContent={renderEventContent}
           select={handleSelect}
-          eventDrop={handleDrop}
-          eventResize={handleResize}
+          eventDrop={(arg: EventDropArg) => updateCalendarTaskTime(arg.event.id, arg.event.start, arg.event.end, arg.event.allDay)}
+          eventResize={(arg: EventResizeDoneArg) => updateCalendarTaskTime(arg.event.id, arg.event.start, arg.event.end, arg.event.allDay)}
           datesSet={(arg: DatesSetArg) => setCalendarTitle(arg.view.title)}
           eventClick={(arg: EventClickArg) => {
             const task = tasks.find((item) => item.id === arg.event.id);
@@ -347,7 +350,7 @@ const CalendarView = () => {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-h-[90vh] w-[min(92vw,860px)] max-w-[860px] overflow-hidden rounded-[28px] border-slate-200 bg-white p-0">
           <DialogHeader className="px-6 pt-6">
-            <DialogTitle className="text-2xl font-black text-slate-900">{draft.id ? '编辑任务' : '新建任务'}</DialogTitle>
+            <DialogTitle className="text-2xl font-black text-slate-900">{draft.id ? t('calendar.editTask') : t('calendar.createTask')}</DialogTitle>
           </DialogHeader>
           <div className="grid max-h-[calc(90vh-132px)] gap-4 overflow-y-auto px-6 py-2">
             <Input
@@ -355,26 +358,21 @@ const CalendarView = () => {
               value={draft.title}
               onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}
               className="h-12 rounded-2xl border-slate-200 bg-slate-50"
-              placeholder="任务标题"
+              placeholder={t('calendar.taskTitle')}
             />
             <textarea
               value={draft.notes || ''}
               onChange={(event) => setDraft((current) => ({ ...current, notes: event.target.value }))}
               className="min-h-[120px] rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm outline-none"
-              placeholder="备注、执行标准、上下文"
+              placeholder={t('calendar.taskNotes')}
             />
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">开始时间</div>
-                <Input
-                  type="datetime-local"
-                  value={toDateTimeInputValue(draft.scheduledStart)}
-                  onChange={(event) => setDraft((current) => ({ ...current, scheduledStart: normalizeDateTimeInput(event.target.value) }))}
-                  className="rounded-2xl border-slate-200 bg-slate-50"
-                />
+                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{t('calendar.start')}</div>
+                <Input type="datetime-local" value={toDateTimeInputValue(draft.scheduledStart)} onChange={(event) => setDraft((current) => ({ ...current, scheduledStart: normalizeDateTimeInput(event.target.value) }))} className="rounded-2xl border-slate-200 bg-slate-50" />
               </div>
               <div>
-                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">结束时间</div>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{t('calendar.end')}</div>
                 <Input
                   type="datetime-local"
                   value={toDateTimeInputValue(draft.scheduledEnd)}
@@ -388,29 +386,23 @@ const CalendarView = () => {
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">优先级</div>
-                <select
-                  value={draft.priority}
-                  onChange={(event) => setDraft((current) => ({ ...current, priority: event.target.value as TaskPriority }))}
-                  className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none"
-                >
+                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{t('calendar.priority')}</div>
+                <select value={draft.priority} onChange={(event) => setDraft((current) => ({ ...current, priority: event.target.value as TaskPriority }))} className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none">
                   {priorityOptions.map((priority) => (
                     <option key={priority} value={priority}>{priorityLabel[priority]}</option>
                   ))}
                 </select>
               </div>
               <div>
-                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">状态</div>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{t('calendar.status')}</div>
                 <select
                   data-testid="calendar-task-status"
                   value={draft.status}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      status: event.target.value as TaskStatus,
-                      completedAt: event.target.value === 'done' ? current.completedAt || new Date().toISOString() : undefined,
-                    }))
-                  }
+                  onChange={(event) => setDraft((current) => ({
+                    ...current,
+                    status: event.target.value as TaskStatus,
+                    completedAt: event.target.value === 'done' ? current.completedAt || new Date().toISOString() : undefined,
+                  }))}
                   className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none"
                 >
                   {statusOptions.map((status) => (
@@ -419,24 +411,17 @@ const CalendarView = () => {
                 </select>
               </div>
             </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">分类</div>
-                <select
-                  data-testid="calendar-task-list-select"
-                  value={draft.listId}
-                  onChange={(event) => setDraft((current) => ({ ...current, listId: event.target.value }))}
-                  className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none"
-                >
-                  {lists.map((list) => (
-                    <option key={list.id} value={list.id}>{list.name}</option>
-                  ))}
-                </select>
-              </div>
+            <div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{t('calendar.category')}</div>
+              <select data-testid="calendar-task-list-select" value={draft.listId} onChange={(event) => setDraft((current) => ({ ...current, listId: event.target.value }))} className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none">
+                {lists.map((list) => (
+                  <option key={list.id} value={list.id}>{list.name}</option>
+                ))}
+              </select>
             </div>
             {selectedList(draft.listId) && (
               <div className="rounded-2xl bg-slate-50 p-3 text-sm text-slate-500">
-                当前归属：<span className="font-semibold text-slate-700">{selectedList(draft.listId)?.name}</span>
+                {t('calendar.currentCategory', { name: selectedList(draft.listId)?.name || '' })}
               </div>
             )}
 
@@ -444,68 +429,47 @@ const CalendarView = () => {
               <div className="rounded-2xl bg-slate-50 p-4">
                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
                   <Target size={14} className="text-primary" />
-                  关联季度目标
+                  {t('calendar.goalLink')}
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {goals.length ? goals.map((goal) => {
                     const active = draft.linkedGoalIds.includes(goal.id);
                     return (
-                      <button
-                        key={goal.id}
-                        type="button"
-                        onClick={() => toggleLinkedId('linkedGoalIds', goal.id)}
-                        className={`rounded-full px-3 py-2 text-xs transition ${active ? 'bg-primary text-white' : 'bg-white text-slate-600'}`}
-                      >
+                      <button key={goal.id} type="button" onClick={() => toggleLinkedId('linkedGoalIds', goal.id)} className={`rounded-full px-3 py-2 text-xs transition ${active ? 'bg-primary text-white' : 'bg-white text-slate-600'}`}>
                         {goal.title}
                       </button>
                     );
-                  }) : (
-                    <p className="text-sm text-slate-500">当前还没有季度目标。</p>
-                  )}
+                  }) : <p className="text-sm text-slate-500">{t('calendar.noGoalLink')}</p>}
                 </div>
               </div>
 
               <div className="rounded-2xl bg-slate-50 p-4">
                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
                   <Flag size={14} className="text-primary" />
-                  关联本周目标
+                  {t('calendar.weekGoalLink')}
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {weeklyGoalOptions.length ? weeklyGoalOptions.map((goal: WeeklyGoal) => {
                     const active = draft.linkedWeeklyGoalIds.includes(goal.id);
                     return (
-                      <button
-                        key={goal.id}
-                        type="button"
-                        onClick={() => toggleLinkedId('linkedWeeklyGoalIds', goal.id)}
-                        className={`rounded-full px-3 py-2 text-xs transition ${active ? 'bg-slate-900 text-white' : 'bg-white text-slate-600'}`}
-                      >
+                      <button key={goal.id} type="button" onClick={() => toggleLinkedId('linkedWeeklyGoalIds', goal.id)} className={`rounded-full px-3 py-2 text-xs transition ${active ? 'bg-slate-900 text-white' : 'bg-white text-slate-600'}`}>
                         {goal.text}
                       </button>
                     );
-                  }) : (
-                    <p className="text-sm text-slate-500">本周还没有可关联的周目标。</p>
-                  )}
+                  }) : <p className="text-sm text-slate-500">{t('calendar.noWeekGoalLink')}</p>}
                 </div>
               </div>
             </div>
 
             {draft.id && (
-              <Button
-                variant="ghost"
-                className="justify-start rounded-2xl text-rose-600 hover:bg-rose-50"
-                onClick={() => {
-                  deleteTask(draft.id);
-                  setDialogOpen(false);
-                }}
-              >
-                删除任务
+              <Button variant="ghost" className="justify-start rounded-2xl text-rose-600 hover:bg-rose-50" onClick={() => { deleteTask(draft.id); setDialogOpen(false); }}>
+                {t('calendar.deleteTask')}
               </Button>
             )}
           </div>
           <DialogFooter className="gap-2 px-6 pb-6">
-            <Button variant="outline" className="rounded-2xl" onClick={() => setDialogOpen(false)}>取消</Button>
-            <Button data-testid="calendar-task-save" className="rounded-2xl" onClick={saveDraft}>保存</Button>
+            <Button variant="outline" className="rounded-2xl" onClick={() => setDialogOpen(false)}>{t('common.cancel')}</Button>
+            <Button data-testid="calendar-task-save" className="rounded-2xl" onClick={saveDraft}>{t('common.save')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

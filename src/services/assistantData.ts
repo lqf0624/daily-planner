@@ -1,12 +1,8 @@
 import {
   eachDayOfInterval,
-  endOfISOWeek,
   endOfMonth,
   format,
-  getISOWeek,
-  getISOWeekYear,
   parseISO,
-  startOfISOWeek,
   startOfMonth,
   subDays,
   subMonths,
@@ -14,6 +10,7 @@ import {
 } from 'date-fns';
 import { useAppStore } from '../stores/useAppStore.js';
 import { getTaskDisplayDate, getTaskEnd, getTaskStart, isTaskCompleted } from '../utils/taskActivity.js';
+import { endOfPlannerWeek, getPlannerWeek, getPlannerWeekYear, startOfPlannerWeek } from '../utils/week.js';
 
 export type AssistantDataScope =
   | 'today'
@@ -44,7 +41,7 @@ const getWeekKeysInRange = (startDate: string, endDate: string) => new Set(
   eachDayOfInterval({
     start: parseISO(startDate),
     end: parseISO(endDate),
-  }).map((date) => `${getISOWeekYear(date)}-${getISOWeek(date)}`),
+  }).map((date) => `${getPlannerWeekYear(date)}-${getPlannerWeek(date)}`),
 );
 
 const getDateRange = (request: AssistantDataRequest, now: Date): DateRange => {
@@ -59,10 +56,10 @@ const getDateRange = (request: AssistantDataRequest, now: Date): DateRange => {
     case 'last_7_days':
       return { label: 'last_7_days', startDate: format(subDays(now, 6), 'yyyy-MM-dd'), endDate: today };
     case 'this_week':
-      return { label: 'this_week', startDate: format(startOfISOWeek(now), 'yyyy-MM-dd'), endDate: format(endOfISOWeek(now), 'yyyy-MM-dd') };
+      return { label: 'this_week', startDate: format(startOfPlannerWeek(now), 'yyyy-MM-dd'), endDate: format(endOfPlannerWeek(now), 'yyyy-MM-dd') };
     case 'last_week': {
       const date = subWeeks(now, 1);
-      return { label: 'last_week', startDate: format(startOfISOWeek(date), 'yyyy-MM-dd'), endDate: format(endOfISOWeek(date), 'yyyy-MM-dd') };
+      return { label: 'last_week', startDate: format(startOfPlannerWeek(date), 'yyyy-MM-dd'), endDate: format(endOfPlannerWeek(date), 'yyyy-MM-dd') };
     }
     case 'this_month':
       return { label: 'this_month', startDate: format(startOfMonth(now), 'yyyy-MM-dd'), endDate: format(endOfMonth(now), 'yyyy-MM-dd') };

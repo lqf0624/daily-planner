@@ -1,4 +1,4 @@
-import { expect, test, type Browser, type Page } from '@playwright/test';
+﻿import { expect, test, type Browser, type Page } from '@playwright/test';
 
 const openFreshApp = async (page: Page) => {
   await page.goto('/');
@@ -14,7 +14,7 @@ const configureAI = async (page: Page) => {
   await page.getByTestId('settings-ai-api-key').fill('test-api-key');
   await page.getByTestId('settings-ai-base-url').fill('https://example.com/v1');
   await page.getByTestId('settings-ai-model').fill('gpt-test-model');
-  await page.getByRole('button', { name: /close/i }).click();
+  await page.getByRole('button', { name: /close/i }).first().click();
 };
 
 const openFloatingPair = async (browser: Browser) => {
@@ -81,12 +81,13 @@ test('calendar supports day view and navigating to past periods', async ({ page 
   await openFreshApp(page);
 
   await page.getByTestId('nav-calendar').click();
-  await page.getByRole('button', { name: '月视图' }).click();
+  await page.getByTestId('calendar-view-dayGridMonth').click();
   const currentMonthTitle = await page.getByTestId('calendar-title').textContent();
   await page.getByTestId('calendar-prev').click();
   await expect(page.getByTestId('calendar-title')).not.toHaveText(currentMonthTitle || '');
 
-  await page.getByRole('button', { name: '日视图' }).click();
+  await page.getByTestId('calendar-view-timeGridDay').click();
+  await expect(page.getByTestId('calendar-title')).toContainText(String(new Date().getFullYear()));
   const currentDayTitle = await page.getByTestId('calendar-title').textContent();
   await page.getByTestId('calendar-prev').click();
   await expect(page.getByTestId('calendar-title')).not.toHaveText(currentDayTitle || '');
@@ -125,7 +126,30 @@ test('today task detail can mark a task as completed', async ({ page }) => {
   await page.getByTestId('today-quick-add-button').click();
   await page.getByTestId('today-detail-complete').click();
 
-  await expect(page.getByTestId('today-detail-complete')).toHaveText(/恢复为待办/);
+  await expect(page.getByTestId('today-detail-complete')).toContainText('Restore');
+});
+
+test('backlog task can be scheduled into today and then appears in calendar', async ({ page }) => {
+  await openFreshApp(page);
+
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const start = `${year}-${month}-${day}T14:00`;
+  const end = `${year}-${month}-${day}T15:00`;
+
+  await page.getByTestId('backlog-quick-add-input').fill('backlog-task-a');
+  await page.getByTestId('backlog-quick-add-button').click();
+  await page.getByTestId('today-detail-schedule').click();
+  await page.getByTestId('backlog-schedule-start').fill(start);
+  await page.getByTestId('backlog-schedule-end').fill(end);
+  await page.getByTestId('backlog-schedule-save').click();
+
+  await expect(page.getByText('backlog-task-a').first()).toBeVisible();
+  await page.getByTestId('nav-calendar').click();
+  await page.getByTestId('calendar-search-input').fill('backlog-task-a');
+  await expect(page.locator('.fc-event, .fc-list-event').filter({ hasText: 'backlog-task-a' }).first()).toBeVisible();
 });
 
 test('calendar task dialog can mark a task as completed', async ({ page }) => {
@@ -225,6 +249,16 @@ test('settings updates ai configuration fields', async ({ page }) => {
   await expect(page.getByTestId('settings-ai-model')).toHaveValue('gpt-test-model');
 });
 
+test('settings can switch app language manually', async ({ page }) => {
+  await openFreshApp(page);
+
+  await page.getByTestId('open-settings').click();
+  await page.getByTestId('settings-language-select').selectOption('de');
+  await page.getByRole('button', { name: /schließen|close/i }).first().click();
+
+  await expect(page.getByTestId('nav-today')).toContainText('Heute');
+});
+
 test('settings can check updates and render install action when a release is available', async ({ page }) => {
   await openFreshApp(page);
 
@@ -255,7 +289,7 @@ test('settings can create a new task category and calendar task can use it', asy
   await page.getByTestId('settings-list-name').fill('side-project');
   await page.getByTestId('settings-list-add').click();
   await expect(page.locator('input[value="side-project"]').first()).toBeVisible();
-  await page.getByRole('button', { name: /close/i }).click();
+  await page.getByRole('button', { name: /close/i }).first().click();
 
   await page.getByTestId('nav-calendar').click();
   await page.getByTestId('calendar-new-task').click();
@@ -492,6 +526,7 @@ test('mini floating context menu stays fully visible', async ({ page }) => {
   await page.goto('/?view=floating&mode=mini');
   await page.getByTestId('floating-shell').click({ button: 'right', position: { x: 330, y: 40 } });
 
-  await expect(page.getByText('切换完整悬浮窗')).toBeVisible();
-  await expect(page.getByText('隐藏悬浮窗')).toBeVisible();
+  await expect(page.getByTestId('floating-menu-standard')).toBeVisible();
+  await expect(page.getByTestId('floating-menu-hide')).toBeVisible();
 });
+

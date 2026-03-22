@@ -1,15 +1,16 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
-import { CalendarDays, ClipboardList, ListTodo, PanelRightOpen, PanelRightClose, Settings, Sparkles, Target, Timer, Loader2 } from 'lucide-react';
+import { CalendarDays, ClipboardList, ListTodo, Loader2, PanelRightClose, PanelRightOpen, Settings, Sparkles, Target, Timer } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { invoke } from '@tauri-apps/api/core';
+import SettingsDialog from './components/Settings';
+import { Button } from './components/ui/button';
+import { useI18n } from './i18n';
 import { useAppStore } from './stores/useAppStore';
 import { getOngoingTask, getTaskStart } from './utils/taskActivity';
-import SettingsDialog from './components/Settings';
+import { cn } from './utils/cn';
 import FloatingPomodoro from './views/FloatingPomodoro';
 import FloatingPomodoroSettings from './views/FloatingPomodoroSettings';
 import NotificationView from './views/NotificationView';
-import { Button } from './components/ui/button';
-import { cn } from './utils/cn';
 
 const TodayWorkspace = lazy(() => import('./components/TodayWorkspace'));
 const CalendarView = lazy(() => import('./components/CalendarView'));
@@ -19,18 +20,10 @@ const QuarterlyGoals = lazy(() => import('./components/QuarterlyGoals'));
 const PomodoroTimer = lazy(() => import('./components/PomodoroTimer'));
 const AIAssistant = lazy(() => import('./components/AIAssistant'));
 
-const navItems = [
-  { id: 'today', label: '今日', icon: ListTodo },
-  { id: 'calendar', label: '日历', icon: CalendarDays },
-  { id: 'weekly-plan', label: '周计划', icon: ClipboardList },
-  { id: 'weekly-report', label: '周报', icon: Sparkles },
-  { id: 'goals', label: '季度目标', icon: Target },
-  { id: 'pomodoro', label: '番茄钟', icon: Timer },
-] as const;
-
 const LEGACY_IMPORT_MARKER = 'daily-planner-legacy-imported-daily-planner-ai-v1';
 
 const App = () => {
+  const { t } = useI18n();
   const {
     tasks,
     weeklyPlans,
@@ -47,7 +40,7 @@ const App = () => {
     setIsAIPanelOpen,
     importData,
   } = useAppStore();
-  const [activeTab, setActiveTab] = useState<(typeof navItems)[number]['id']>('today');
+  const [activeTab, setActiveTab] = useState<'today' | 'calendar' | 'weekly-plan' | 'weekly-report' | 'goals' | 'pomodoro'>('today');
   const notifiedRef = useRef<Set<string>>(new Set());
 
   const view = useMemo(() => {
@@ -55,6 +48,15 @@ const App = () => {
     const candidate = params.get('view');
     return candidate === 'floating' || candidate === 'floating-settings' || candidate === 'notification' ? candidate : 'main';
   }, []);
+
+  const navItems = useMemo(() => ([
+    { id: 'today', label: t('nav.today'), icon: ListTodo },
+    { id: 'calendar', label: t('nav.calendar'), icon: CalendarDays },
+    { id: 'weekly-plan', label: t('nav.weeklyPlan'), icon: ClipboardList },
+    { id: 'weekly-report', label: t('nav.weeklyReport'), icon: Sparkles },
+    { id: 'goals', label: t('nav.goals'), icon: Target },
+    { id: 'pomodoro', label: t('nav.pomodoro'), icon: Timer },
+  ]), [t]);
 
   useEffect(() => {
     if (view !== 'main') return;
@@ -75,38 +77,35 @@ const App = () => {
         const key = `${task.id}-${currentMinute}`;
         if (notifiedRef.current.has(key)) return;
         if (format(start, 'yyyy-MM-dd HH:mm') === currentMinute) {
-          notify('任务提醒', `${task.title} 现在开始`);
+          notify(t('notify.task'), t('notify.taskStart', { title: task.title }));
           notifiedRef.current.add(key);
         }
       });
 
       const overdue = tasks.find((task) => task.status === 'todo' && task.dueAt && format(parseISO(task.dueAt), 'yyyy-MM-dd') < today);
-      if (overdue) {
-        const key = `overdue-${today}-${overdue.id}`;
-        if (!notifiedRef.current.has(key)) {
-          notify('逾期提醒', `${overdue.title} 已逾期，请尽快处理或重新排期`);
-          notifiedRef.current.add(key);
-        }
-      }
+      if (!overdue) return;
+
+      const key = `overdue-${today}-${overdue.id}`;
+      if (notifiedRef.current.has(key)) return;
+      notify(t('notify.overdue'), t('notify.overdueBody', { title: overdue.title }));
+      notifiedRef.current.add(key);
     };
 
     run();
     const timer = setInterval(run, 30000);
     return () => clearInterval(timer);
-  }, [tasks, view]);
+  }, [tasks, t, view]);
 
   useEffect(() => {
     if (view !== 'main' || !_hasHydrated || typeof window === 'undefined' || typeof localStorage === 'undefined') return;
     if (localStorage.getItem(LEGACY_IMPORT_MARKER)) return;
 
-    const hasCurrentData = (
-      tasks.length > 0
+    const hasCurrentData = tasks.length > 0
       || goals.length > 0
       || weeklyPlans.length > 0
       || weeklyReports.length > 0
       || habits.length > 0
-      || chatHistory.length > 0
-    );
+      || chatHistory.length > 0;
 
     if (hasCurrentData) {
       localStorage.setItem(LEGACY_IMPORT_MARKER, JSON.stringify({ skippedAt: new Date().toISOString(), reason: 'current-store-not-empty' }));
@@ -114,16 +113,11 @@ const App = () => {
     }
 
     let cancelled = false;
-
     invoke<string | null>('load_legacy_daily_planner_ai_store')
       .then((payload) => {
         if (cancelled || !payload) return;
-        const parsed = JSON.parse(payload) as Record<string, unknown>;
-        importData(parsed);
-        localStorage.setItem(LEGACY_IMPORT_MARKER, JSON.stringify({
-          importedAt: new Date().toISOString(),
-          source: 'daily-planner-ai',
-        }));
+        importData(JSON.parse(payload) as Record<string, unknown>);
+        localStorage.setItem(LEGACY_IMPORT_MARKER, JSON.stringify({ importedAt: new Date().toISOString(), source: 'daily-planner-ai' }));
       })
       .catch(() => undefined);
 
@@ -136,10 +130,9 @@ const App = () => {
     if (view !== 'main' || !_hasHydrated) return;
 
     const syncCurrentFocus = () => {
-      const ongoingTask = getOngoingTask(useAppStore.getState().tasks, new Date());
-      const currentTask = useAppStore.getState().currentTaskId
-        ? useAppStore.getState().tasks.find((task) => task.id === useAppStore.getState().currentTaskId)
-        : null;
+      const state = useAppStore.getState();
+      const ongoingTask = getOngoingTask(state.tasks, new Date());
+      const currentTask = state.currentTaskId ? state.tasks.find((task) => task.id === state.currentTaskId) : null;
 
       if (ongoingTask && currentTask?.id !== ongoingTask.id) {
         setCurrentTaskId(ongoingTask.id);
@@ -165,7 +158,7 @@ const App = () => {
       <div className="flex h-screen w-screen items-center justify-center bg-[#f6f7f9] text-slate-500">
         <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
           <Loader2 size={18} className="animate-spin" />
-          正在恢复数据...
+          {t('app.loading')}
         </div>
       </div>
     );
@@ -188,9 +181,9 @@ const App = () => {
     <div className="flex h-screen w-screen overflow-hidden bg-[#f3f5f8] text-slate-900">
       <aside className="flex w-[250px] shrink-0 flex-col border-r border-slate-200 bg-white/85 p-5 backdrop-blur">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.32em] text-slate-400">Daily Planner</p>
-          <h1 className="mt-3 text-2xl font-black tracking-tight text-slate-900">个人工作流</h1>
-          <p className="mt-2 text-sm text-slate-500">季度目标、周计划、任务排程、番茄执行和 AI 副驾统一在一个工作台里。</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.32em] text-slate-400">{t('app.brand')}</p>
+          <h1 className="mt-3 text-2xl font-black tracking-tight text-slate-900">{t('app.title')}</h1>
+          <p className="mt-2 text-sm text-slate-500">{t('app.description')}</p>
         </div>
 
         <nav className="mt-8 space-y-2">
@@ -198,7 +191,7 @@ const App = () => {
             <button
               key={item.id}
               type="button"
-              onClick={() => setActiveTab(item.id)}
+              onClick={() => setActiveTab(item.id as typeof activeTab)}
               data-testid={`nav-${item.id}`}
               className={cn(
                 'flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left transition',
@@ -213,24 +206,24 @@ const App = () => {
 
         <div className="mt-8 grid gap-3">
           <div className="rounded-[24px] bg-slate-50 p-4">
-            <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">当前关注</div>
-            <div className="mt-2 text-sm font-semibold text-slate-800">{activeTask?.title || '暂无进行中的任务'}</div>
+            <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{t('app.currentFocus')}</div>
+            <div className="mt-2 text-sm font-semibold text-slate-800">{activeTask?.title || t('app.currentFocus.empty')}</div>
           </div>
           <div className="rounded-[24px] bg-slate-50 p-4">
-            <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">本周状态</div>
+            <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{t('app.weekStatus')}</div>
             <div className="mt-2 text-sm font-semibold text-slate-800">
-              {currentWeek ? `第 ${currentWeek.weekNumber} 周待复盘` : '本周已复盘'}
+              {currentWeek ? t('app.weekStatus.pending', { week: currentWeek.weekNumber }) : t('app.weekStatus.done')}
             </div>
-            <div className="mt-1 text-xs text-slate-500">{activeGoals} 个进行中的季度目标</div>
+            <div className="mt-1 text-xs text-slate-500">{t('app.activeGoals', { count: activeGoals })}</div>
           </div>
         </div>
 
         <div className="mt-auto flex items-center gap-2">
           <Button data-testid="toggle-ai-panel" variant="outline" className="flex-1 rounded-2xl" onClick={() => setIsAIPanelOpen(!isAIPanelOpen)}>
             {isAIPanelOpen ? <PanelRightClose size={16} className="mr-2" /> : <PanelRightOpen size={16} className="mr-2" />}
-            {isAIPanelOpen ? '隐藏 AI' : '打开 AI'}
+            {isAIPanelOpen ? t('app.hideAi') : t('app.openAi')}
           </Button>
-          <Button data-testid="open-settings" variant="outline" className="rounded-2xl" onClick={() => setIsSettingsOpen(true)}>
+          <Button data-testid="open-settings" variant="outline" className="rounded-2xl" onClick={() => setIsSettingsOpen(true)} aria-label={t('settings.title')}>
             <Settings size={16} />
           </Button>
         </div>
@@ -239,13 +232,13 @@ const App = () => {
       <main className="min-h-0 min-w-0 flex-1 p-6">
         <div className="grid h-full gap-6" style={{ gridTemplateColumns: isAIPanelOpen ? 'minmax(0, 1fr) 380px' : 'minmax(0, 1fr)' }}>
           <section className="min-h-0 min-w-0 overflow-y-auto rounded-[32px] border border-slate-200 bg-white/70 p-6 shadow-sm backdrop-blur">
-            <Suspense fallback={<div className="flex h-full items-center justify-center text-slate-400">加载中...</div>}>
+            <Suspense fallback={<div className="flex h-full items-center justify-center text-slate-400">{t('app.loadingSection')}</div>}>
               {content}
             </Suspense>
           </section>
           {isAIPanelOpen && (
             <section className="min-h-0 overflow-y-auto rounded-[32px] border border-slate-200 bg-white/70 p-4 shadow-sm backdrop-blur">
-              <Suspense fallback={<div className="flex h-full items-center justify-center text-slate-400">加载 AI 面板...</div>}>
+              <Suspense fallback={<div className="flex h-full items-center justify-center text-slate-400">{t('app.loadingAi')}</div>}>
                 <AIAssistant />
               </Suspense>
             </section>

@@ -26,6 +26,8 @@ export const getTaskEnd = (task: Task) => {
   return parseISO(task.scheduledEnd);
 };
 
+export const isTaskBacklog = (task: Task) => !task.scheduledStart && !task.dueAt;
+
 export const getTaskDisplayDate = (task: Task) => {
   const start = getTaskStart(task);
   if (start) return format(start, 'yyyy-MM-dd');
@@ -77,9 +79,9 @@ export const getOngoingTask = (tasks: Task[], now: Date) => {
 export const getTaskDateLabel = (task: Task) => {
   const start = getTaskStart(task);
   const end = getTaskEnd(task);
-  if (!start) return '未安排时间';
-  if (task.allDay) return format(start, 'M月d日');
-  if (!end) return `${format(start, 'M月d日 HH:mm')}`;
-  if (isSameDay(start, end)) return `${format(start, 'M月d日 HH:mm')} - ${format(end, 'HH:mm')}`;
-  return `${format(start, 'M月d日 HH:mm')} - ${format(end, 'M月d日 HH:mm')}`;
+  if (!start) return 'Unscheduled';
+  if (task.allDay) return format(start, 'M/d');
+  if (!end) return format(start, 'M/d HH:mm');
+  if (isSameDay(start, end)) return `${format(start, 'M/d HH:mm')} - ${format(end, 'HH:mm')}`;
+  return `${format(start, 'M/d HH:mm')} - ${format(end, 'M/d HH:mm')}`;
 };

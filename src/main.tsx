@@ -1,29 +1,28 @@
-import React from 'react'
-import ReactDOM from 'react-dom/client'
-import App from './App.tsx'
-import FloatingPomodoro from './views/FloatingPomodoro.tsx'
-import './index.css'
-import { PomodoroProvider } from './contexts/PomodoroContext'
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App.tsx';
+import { PomodoroProvider } from './contexts/PomodoroContext';
+import { I18nProvider } from './i18n';
+import './index.css';
+import FloatingPomodoro from './views/FloatingPomodoro.tsx';
 
-console.log('🚀 Daily Planner Frontend Initializing...');
-
-const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
-const view = params?.get('view')
-const Root = view === 'floating' ? FloatingPomodoro : App
+const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+const view = params?.get('view');
+const Root = view === 'floating' ? FloatingPomodoro : App;
 
 if (view === 'floating' && typeof document !== 'undefined') {
-  document.body.classList.add('floating-view')
-  document.documentElement.classList.add('floating-view')
+  document.body.classList.add('floating-view');
+  document.documentElement.classList.add('floating-view');
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <PomodoroProvider>
-      <Root />
-    </PomodoroProvider>
+    <I18nProvider>
+      <PomodoroProvider>
+        <Root />
+      </PomodoroProvider>
+    </I18nProvider>
   </React.StrictMode>,
-)
+);
 
-// 全局禁用默认右键菜单
-document.addEventListener('contextmenu', (e) => e.preventDefault());
-
+document.addEventListener('contextmenu', (event) => event.preventDefault());
