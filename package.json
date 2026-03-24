@@ -2,7 +2,7 @@
   "name": "daily-planner-ai",
   "description": "Daily planner desktop app for tasks, timeline, habits, pomodoro, and weekly reviews.",
   "private": true,
-  "version": "0.3.3",
+  "version": "0.3.4",
   "author": "lqf0624",
   "type": "module",
   "scripts": {
@@ -14,6 +14,7 @@
     "test:e2e": "npm run build && playwright test",
     "tauri": "tauri",
     "build:tauri": "tauri build",
+    "build:tauri:local": "tauri build -c src-tauri/tauri.local.conf.json",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview"
   },

@@ -1,3 +1,4 @@
+import { isAfter, isSameDay, parseISO } from 'date-fns';
 import {
   AISettings,
   ChatMessage,
@@ -8,6 +9,9 @@ import {
   PomodoroSettings,
   QuarterlyGoal,
   Task,
+  TaskPlanningState,
+  TaskReviewStatus,
+  TaskType,
   TaskPriority,
   TaskStatus,
   WeeklyGoal,
@@ -15,7 +19,7 @@ import {
   WeeklyReport,
 } from '../types/index.js';
 
-export const STORE_VERSION = 7;
+export const STORE_VERSION = 8;
 
 export const nowIso = () => new Date().toISOString();
 
@@ -26,10 +30,10 @@ export const defaultLists: PlannerList[] = [
 ];
 
 export const defaultPomodoroSettings: PomodoroSettings = {
-  workDuration: 25,
-  shortBreakDuration: 5,
-  longBreakDuration: 15,
-  longBreakInterval: 4,
+  workDuration: 60,
+  shortBreakDuration: 10,
+  longBreakDuration: 20,
+  longBreakInterval: 2,
   autoStartBreaks: true,
   autoStartPomodoros: false,
   maxSessions: 8,
@@ -69,6 +73,33 @@ export const normalizePriority = (value: unknown): TaskPriority => {
 export const normalizeStatus = (value: unknown): TaskStatus => {
   if (value === 'todo' || value === 'done' || value === 'archived') return value;
   return 'todo';
+};
+
+export const normalizePlanningState = (value: unknown): TaskPlanningState | undefined => {
+  if (value === 'inbox' || value === 'today' || value === 'later') return value;
+  return undefined;
+};
+
+export const normalizeTaskType = (value: unknown): TaskType | undefined => {
+  if (value === 'deep' || value === 'shallow' || value === 'personal') return value;
+  return undefined;
+};
+
+export const normalizeReviewStatus = (value: unknown): TaskReviewStatus | undefined => {
+  if (value === 'pending' || value === 'carried_forward' || value === 'dropped') return value;
+  return undefined;
+};
+
+const inferPlanningState = (scheduledStart?: string, dueAt?: string, createdAt?: string): TaskPlanningState => {
+  if (!scheduledStart && !dueAt) return 'inbox';
+
+  const now = new Date();
+  const target = scheduledStart || dueAt || createdAt;
+  if (!target) return 'inbox';
+
+  const date = parseISO(target);
+  if (isSameDay(date, now) || !isAfter(date, now)) return 'today';
+  return 'later';
 };
 
 const toIsoFromDateAndTime = (dateStr?: string, timeValue?: string) => {
@@ -114,6 +145,13 @@ export const migrateTask = (raw: Record<string, unknown>): Task => {
         ? raw.description
         : undefined,
     status: normalizeStatus(typeof raw.status === 'string' ? raw.status : done ? 'done' : 'todo'),
+    planningState: normalizePlanningState(raw.planningState) || inferPlanningState(scheduledStart, typeof raw.dueAt === 'string' ? raw.dueAt : scheduledEnd, createdAt),
+    estimatedMinutes: raw.estimatedMinutes === 15 || raw.estimatedMinutes === 30 || raw.estimatedMinutes === 60 || raw.estimatedMinutes === 90
+      ? raw.estimatedMinutes
+      : undefined,
+    taskType: normalizeTaskType(raw.taskType),
+    isHighlight: raw.isHighlight === true,
+    reviewStatus: normalizeReviewStatus(raw.reviewStatus) || 'pending',
     scheduledStart,
     scheduledEnd,
     dueAt: typeof raw.dueAt === 'string'

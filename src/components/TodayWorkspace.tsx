@@ -1,459 +1,502 @@
-import { useMemo, useState } from 'react';
-import { addDays, format, isAfter, isBefore, parseISO } from 'date-fns';
-import { CalendarClock, CheckCircle2, Clock3, Flame, Plus, Sparkles } from 'lucide-react';
-import { useI18n } from '../i18n';
+import { useEffect, useMemo, useState } from 'react';
+import { addHours, format, parseISO } from 'date-fns';
+import { invoke } from '@tauri-apps/api/core';
+import { Coffee, Flame, Monitor, Pause, Play, RotateCcw, Sparkles, Timer } from 'lucide-react';
+import { getFocusCompanionCopy } from '../content/focusCompanionCopy';
+import { getWorkflowCopy } from '../content/workflowCopy';
 import { usePomodoro } from '../contexts/PomodoroContext';
+import { useI18n } from '../i18n';
+import { applyActionPreview } from '../services/aiActions';
 import { useAppStore } from '../stores/useAppStore';
-import { Task, TaskPriority } from '../types';
-import { getTaskDateLabel, getTaskDisplayDate, getTaskStart, isTaskBacklog, isTaskScheduledOnDate } from '../utils/taskActivity';
-import { cn } from '../utils/cn';
-import { getPlannerWeek, getPlannerWeekYear } from '../utils/week';
+import { Task } from '../types';
+import { readFloatingMode, readFloatingSize } from '../utils/floatingWindow';
+import { buildFocusSessionBrief, getFocusRhythmPreset, getRecommendedFocusRhythm } from '../utils/focusRhythm';
+import { getPlanningState, getTaskDateLabel, isLaterTask, isTodayTask } from '../utils/taskActivity';
+import CalendarView from './CalendarView';
+import WorkflowSuggestionCard from './WorkflowSuggestionCard';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { Input } from './ui/input';
 
-const createScheduledTask = (title: string): Task => {
-  const now = new Date();
-  const iso = now.toISOString();
-  const date = format(now, 'yyyy-MM-dd');
+type TaskAction = {
+  label: string;
+  onClick: () => void;
+};
+
+const toDateTimeInputValue = (value?: string) => (value ? format(parseISO(value), "yyyy-MM-dd'T'HH:mm") : '');
+const normalizeDateTimeInput = (value: string) => (value ? `${value}:00` : undefined);
+const inferPlanningState = (start?: string, dueAt?: string): Task['planningState'] => {
+  if (!start && !dueAt) return 'inbox';
+  const date = parseISO(start || dueAt || new Date().toISOString());
+  const today = format(new Date(), 'yyyy-MM-dd');
+  return format(date, 'yyyy-MM-dd') <= today ? 'today' : 'later';
+};
+
+const buildDefaultSchedule = (task: Task) => {
+  if (task.scheduledStart && task.scheduledEnd) {
+    return {
+      start: toDateTimeInputValue(task.scheduledStart),
+      end: toDateTimeInputValue(task.scheduledEnd),
+    };
+  }
+
+  const base = task.dueAt ? parseISO(task.dueAt) : new Date();
   return {
-    id: crypto.randomUUID(),
-    title,
-    status: 'todo',
-    allDay: true,
-    priority: 'medium',
-    listId: 'inbox',
-    tagIds: [],
-    linkedGoalIds: [],
-    linkedWeeklyGoalIds: [],
-    pomodoroSessions: 0,
-    pomodoroMinutes: 0,
-    createdAt: iso,
-    updatedAt: iso,
-    scheduledStart: `${date}T09:00:00`,
-    dueAt: `${date}T09:00:00`,
+    start: format(base, "yyyy-MM-dd'T'HH:mm"),
+    end: format(addHours(base, 1), "yyyy-MM-dd'T'HH:mm"),
   };
 };
 
-const createBacklogTask = (title: string): Task => {
-  const iso = new Date().toISOString();
-  return {
-    id: crypto.randomUUID(),
-    title,
-    status: 'todo',
-    allDay: false,
-    priority: 'medium',
-    listId: 'inbox',
-    tagIds: [],
-    linkedGoalIds: [],
-    linkedWeeklyGoalIds: [],
-    pomodoroSessions: 0,
-    pomodoroMinutes: 0,
-    createdAt: iso,
-    updatedAt: iso,
-  };
+const inferBrowserPlatform = () => {
+  if (typeof navigator === 'undefined') return 'unknown';
+  return /mac/i.test(navigator.userAgent) ? 'macos' : 'windows';
 };
 
-const toDateTimeInput = (value?: string) => {
-  if (!value) return '';
-  return value.slice(0, 16);
-};
-
-const TaskRow = ({
+const TaskChip = ({
   task,
-  listColor,
-  listName,
-  selected,
-  onSelect,
-  onToggle,
-  onFocus,
-  onSchedule,
-  priorityLabel,
-  startFocusLabel,
-  scheduleLabel,
-  showSchedule,
+  actions,
+  copy,
 }: {
   task: Task;
-  listColor: string;
-  listName: string;
-  selected: boolean;
-  onSelect: () => void;
-  onToggle: () => void;
-  onFocus: () => void;
-  onSchedule?: () => void;
-  priorityLabel: Record<TaskPriority, string>;
-  startFocusLabel: string;
-  scheduleLabel: string;
-  showSchedule?: boolean;
-}) => {
-  const priorityTone: Record<TaskPriority, string> = {
-    low: 'bg-slate-100 text-slate-500',
-    medium: 'bg-amber-50 text-amber-700',
-    high: 'bg-rose-50 text-rose-700',
-  };
-
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={cn('w-full rounded-2xl border p-4 text-left transition hover:border-slate-300', selected ? 'border-primary bg-primary/5 shadow-sm' : 'border-slate-200 bg-white')}
-      style={{ borderLeftWidth: 4, borderLeftColor: listColor }}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 space-y-2">
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={(event) => { event.stopPropagation(); onToggle(); }} className="text-slate-400 transition hover:text-primary">
-              <CheckCircle2 size={18} className={task.status === 'done' ? 'fill-primary text-primary' : ''} />
-            </button>
-            <span className={cn('truncate font-semibold', task.status === 'done' ? 'text-slate-400 line-through' : 'text-slate-800')}>{task.title}</span>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            <span className="rounded-full px-2 py-1 font-medium" style={{ backgroundColor: `${listColor}1A`, color: listColor }}>{listName}</span>
-            <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-500">{getTaskDateLabel(task)}</span>
-            <span className={cn('rounded-full px-2 py-1', priorityTone[task.priority])}>{priorityLabel[task.priority]}</span>
-            {task.pomodoroSessions > 0 && (
-              <span className="rounded-full bg-orange-50 px-2 py-1 text-orange-600">{task.pomodoroSessions} / {task.pomodoroMinutes} min</span>
-            )}
-          </div>
-        </div>
-        <div className="flex shrink-0 gap-2">
-          {showSchedule && onSchedule && (
-            <Button variant="outline" size="sm" className="rounded-xl" onClick={(event) => { event.stopPropagation(); onSchedule(); }}>
-              {scheduleLabel}
-            </Button>
-          )}
-          <Button data-testid="today-start-focus" variant="ghost" size="sm" className="rounded-xl text-primary hover:bg-primary/10" onClick={(event) => { event.stopPropagation(); onFocus(); }}>
-            {startFocusLabel}
-          </Button>
+  actions: TaskAction[];
+  copy: ReturnType<typeof getWorkflowCopy>['today'];
+}) => (
+  <div className="rounded-[24px] border border-slate-200 bg-slate-50/80 p-4">
+    <div className="flex items-start justify-between gap-3">
+      <div className="min-w-0">
+        <div className="font-semibold text-slate-900">{task.title}</div>
+        <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
+          {task.estimatedMinutes && <span className="rounded-full bg-white px-2 py-1">{copy.estimateMinutes(task.estimatedMinutes)}</span>}
+          {task.taskType && <span className="rounded-full bg-white px-2 py-1">{copy.taskTypeLabels[task.taskType]}</span>}
+          {(task.scheduledStart || task.dueAt) && <span className="rounded-full bg-white px-2 py-1">{getTaskDateLabel(task)}</span>}
         </div>
       </div>
-    </button>
-  );
-};
+      <div className="flex shrink-0 flex-wrap justify-end gap-2">
+        {actions.map((action) => (
+          <Button key={action.label} variant="outline" className="rounded-2xl" onClick={action.onClick}>
+            {action.label}
+          </Button>
+        ))}
+      </div>
+    </div>
+  </div>
+);
 
-const TodayWorkspace = ({ onOpenPomodoro }: { onOpenPomodoro: () => void }) => {
-  const { t, formatDate } = useI18n();
+const TodayWorkspace = () => {
+  const { locale, t } = useI18n();
+  const workflowCopy = getWorkflowCopy(locale);
+  const copy = workflowCopy.today;
+  const focusCopy = getFocusCompanionCopy(locale);
   const {
     tasks,
-    lists,
     goals,
-    weeklyPlans,
     currentTaskId,
-    selectedTaskId,
-    setSelectedTaskId,
     setCurrentTaskId,
-    addTask,
+    promoteTaskToHighlight,
+    promoteTaskToSupport,
+    setTaskPlanningState,
     updateTask,
+    pomodoroHistory,
   } = useAppStore();
-  const { isActive, toggleTimer } = usePomodoro();
-  const [draft, setDraft] = useState('');
-  const [backlogDraft, setBacklogDraft] = useState('');
-  const [scheduleTaskId, setScheduleTaskId] = useState<string | null>(null);
-  const [scheduleStart, setScheduleStart] = useState(() => `${format(new Date(), 'yyyy-MM-dd')}T09:00`);
-  const [scheduleEnd, setScheduleEnd] = useState(() => `${format(new Date(), 'yyyy-MM-dd')}T10:00`);
-  const today = format(new Date(), 'yyyy-MM-dd');
+  const { timeLeft, isActive, mode, pomodoroSettings, updatePomodoroSettings, toggleTimer, resetTimer } = usePomodoro();
+  const [view, setView] = useState<'plan' | 'calendar'>('plan');
+  const [scheduleTask, setScheduleTask] = useState<Task | null>(null);
+  const [scheduleStart, setScheduleStart] = useState('');
+  const [scheduleEnd, setScheduleEnd] = useState('');
+  const [platform, setPlatform] = useState('unknown');
 
-  const priorityLabel: Record<TaskPriority, string> = {
-    low: t('priority.low'),
-    medium: t('priority.medium'),
-    high: t('priority.high'),
+  useEffect(() => {
+    setPlatform(inferBrowserPlatform());
+    invoke<string>('get_runtime_platform').then(setPlatform).catch(() => undefined);
+  }, []);
+
+  const todayTasks = useMemo(() => tasks.filter(isTodayTask), [tasks]);
+  const laterTasks = useMemo(() => tasks.filter(isLaterTask), [tasks]);
+  const activeGoals = useMemo(() => goals.filter((goal) => !goal.isCompleted).slice(0, 3), [goals]);
+  const highlightTask = useMemo(() => todayTasks.find((task) => task.isHighlight) || todayTasks[0] || null, [todayTasks]);
+  const supportTasks = useMemo(() => todayTasks.filter((task) => task.id !== highlightTask?.id).slice(0, 2), [highlightTask?.id, todayTasks]);
+  const parkingLot = useMemo(() => [
+    ...todayTasks.filter((task) => task.id !== highlightTask?.id && !supportTasks.some((item) => item.id === task.id)).slice(0, 3),
+    ...laterTasks.slice(0, 3),
+  ], [highlightTask?.id, laterTasks, supportTasks, todayTasks]);
+  const activeFocusTask = tasks.find((task) => task.id === currentTaskId) || highlightTask;
+  const timerLabel = `${Math.floor(timeLeft / 60).toString().padStart(2, '0')}:${(timeLeft % 60).toString().padStart(2, '0')}`;
+  const completedToday = todayTasks.filter((task) => task.status === 'done').length;
+  const todayStats = pomodoroHistory[format(new Date(), 'yyyy-MM-dd')] || { minutes: 0, sessions: 0 };
+  const isMac = platform === 'macos';
+  const recommendedRhythm = useMemo(() => getRecommendedFocusRhythm(activeFocusTask), [activeFocusTask]);
+  const focusBrief = useMemo(() => buildFocusSessionBrief(activeFocusTask), [activeFocusTask]);
+  const rhythmPresets = useMemo(() => ([
+    getFocusRhythmPreset(30),
+    getFocusRhythmPreset(60),
+    getFocusRhythmPreset(90),
+  ]), []);
+  const recoveryMinutes = mode === 'longBreak'
+    ? pomodoroSettings.longBreakDuration
+    : pomodoroSettings.shortBreakDuration;
+  const focusStatus = mode === 'work'
+    ? (isActive ? focusCopy.statusFocusing(pomodoroSettings.workDuration) : focusCopy.statusIdle)
+    : focusCopy.statusBreak(recoveryMinutes);
+
+  const applyRhythmPreset = (focusMinutes: 15 | 30 | 60 | 90) => {
+    const preset = getFocusRhythmPreset(focusMinutes);
+    updatePomodoroSettings({
+      workDuration: preset.focusMinutes,
+      shortBreakDuration: preset.shortBreakMinutes,
+      longBreakDuration: preset.longBreakMinutes,
+      longBreakInterval: preset.longBreakInterval,
+    });
   };
 
-  const scheduledTasks = useMemo(() => tasks.filter((task) => !isTaskBacklog(task) && task.status !== 'archived'), [tasks]);
+  const openFocusCompanion = () => {
+    if (isMac) return;
 
-  const todayTasks = useMemo(() => scheduledTasks
-    .filter((task) => isTaskScheduledOnDate(task, today))
-    .sort((a, b) => {
-      const aTime = getTaskStart(a)?.getTime() || Number.MAX_SAFE_INTEGER;
-      const bTime = getTaskStart(b)?.getTime() || Number.MAX_SAFE_INTEGER;
-      return aTime - bTime;
-    }), [scheduledTasks, today]);
-
-  const backlogTasks = useMemo(() => tasks
-    .filter((task) => task.status === 'todo' && isTaskBacklog(task))
-    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)), [tasks]);
-
-  const upcomingTasks = useMemo(() => {
-    const endDate = format(addDays(new Date(), 7), 'yyyy-MM-dd');
-    return scheduledTasks.filter((task) => {
-      const date = getTaskDisplayDate(task);
-      return task.status === 'todo'
-        && isAfter(parseISO(`${date}T00:00:00`), parseISO(`${today}T00:00:00`))
-        && !isAfter(parseISO(`${date}T00:00:00`), parseISO(`${endDate}T00:00:00`));
-    }).slice(0, 5);
-  }, [scheduledTasks, today]);
-
-  const overdueTasks = useMemo(() => scheduledTasks.filter((task) => task.status === 'todo' && isBefore(parseISO(`${getTaskDisplayDate(task)}T00:00:00`), parseISO(`${today}T00:00:00`))), [scheduledTasks, today]);
-  const currentQuarterGoals = goals.filter((goal) => !goal.isCompleted);
-  const currentWeekPlan = weeklyPlans.find((plan) => plan.weekNumber === getPlannerWeek(new Date()) && plan.year === getPlannerWeekYear(new Date()));
-  const selectedTask = tasks.find((task) => task.id === selectedTaskId) || todayTasks[0] || backlogTasks[0] || upcomingTasks[0] || null;
-  const completeCount = todayTasks.filter((task) => task.status === 'done').length;
-  const activeFocusTask = tasks.find((task) => task.id === currentTaskId) || null;
-
-  const startFocus = (taskId: string) => {
-    setCurrentTaskId(taskId);
-    setSelectedTaskId(taskId);
-    onOpenPomodoro();
-    if (!isActive) toggleTimer();
+    const mode = readFloatingMode();
+    const size = readFloatingSize(mode);
+    invoke('toggle_floating_window', { mode, width: size.width, height: size.height }).catch(() => undefined);
   };
 
   const openScheduleDialog = (task: Task) => {
-    const baseDate = format(new Date(), 'yyyy-MM-dd');
-    setScheduleTaskId(task.id);
-    setScheduleStart(toDateTimeInput(task.scheduledStart) || `${baseDate}T09:00`);
-    setScheduleEnd(toDateTimeInput(task.scheduledEnd) || `${baseDate}T10:00`);
+    const defaults = buildDefaultSchedule(task);
+    setScheduleTask(task);
+    setScheduleStart(defaults.start);
+    setScheduleEnd(defaults.end);
   };
 
   const saveSchedule = () => {
-    if (!scheduleTaskId || !scheduleStart) return;
-    updateTask(scheduleTaskId, {
-      scheduledStart: `${scheduleStart}:00`,
-      scheduledEnd: scheduleEnd ? `${scheduleEnd}:00` : undefined,
-      dueAt: `${(scheduleEnd || scheduleStart)}:00`,
-      allDay: false,
+    if (!scheduleTask || !scheduleStart || !scheduleEnd) return;
+
+    const start = normalizeDateTimeInput(scheduleStart);
+    const end = normalizeDateTimeInput(scheduleEnd);
+    if (!start || !end) return;
+
+    updateTask(scheduleTask.id, {
+      scheduledStart: start,
+      scheduledEnd: end,
+      dueAt: end,
+      planningState: inferPlanningState(start, end),
     });
-    setScheduleTaskId(null);
+
+    setScheduleTask(null);
   };
 
-  return (
-    <div className="grid min-h-full gap-6 2xl:grid-cols-[minmax(0,1.4fr)_360px]">
-      <div className="flex min-h-0 flex-col gap-6">
-        <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-4">
+  const startFocus = (taskId: string) => {
+    setCurrentTaskId(taskId);
+    if (!isActive) toggleTimer();
+  };
+
+  const completeTask = (task: Task) => {
+    updateTask(task.id, {
+      status: task.status === 'done' ? 'todo' : 'done',
+      completedAt: task.status === 'done' ? undefined : new Date().toISOString(),
+    });
+  };
+
+  if (view === 'calendar') {
+    return (
+      <div className="flex h-full min-h-0 flex-col gap-6">
+        <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex items-center justify-between gap-4">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">{t('today.workspace')}</p>
-              <h2 className="mt-2 text-3xl font-black tracking-tight text-slate-900">
-                {t('today.heading', { date: formatDate(new Date(), { month: 'numeric', day: 'numeric' }) })}
-              </h2>
-              <p className="mt-2 text-sm text-slate-500">{t('today.summary', { done: completeCount, total: todayTasks.length, overdue: overdueTasks.length })}</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">{copy.calendarHeaderEyebrow}</p>
+              <h2 className="mt-2 text-3xl font-black tracking-tight text-slate-900">{copy.title}</h2>
+              <p className="mt-2 text-sm text-slate-500">{copy.calendarHeaderDescription}</p>
             </div>
-            <div className="grid min-w-[240px] grid-cols-2 gap-3">
-              <div className="rounded-2xl bg-slate-50 p-4">
-                <div className="flex items-center gap-2 text-xs font-semibold text-slate-500"><Clock3 size={14} />{t('today.tasks')}</div>
-                <div className="mt-3 text-2xl font-black text-slate-900">{todayTasks.length}</div>
-              </div>
-              <div className="rounded-2xl bg-orange-50 p-4">
-                <div className="flex items-center gap-2 text-xs font-semibold text-orange-700"><Flame size={14} />{t('today.activeFocus')}</div>
-                <div data-testid="today-active-focus-count" className="mt-3 text-2xl font-black text-slate-900">{activeFocusTask ? 1 : 0}</div>
-                <div className="mt-1 truncate text-xs text-orange-700/80">{activeFocusTask?.title || t('today.activeFocus.empty')}</div>
-              </div>
+            <div className="flex gap-2">
+              <Button data-testid="today-view-plan" variant="outline" className="rounded-2xl" onClick={() => setView('plan')}>{copy.planningBoard}</Button>
+              <Button data-testid="today-view-calendar" className="rounded-2xl" onClick={() => setView('calendar')}>{copy.calendar}</Button>
             </div>
-          </div>
-
-          <div className="mt-6 flex gap-3">
-            <Input
-              value={draft}
-              data-testid="today-quick-add-input"
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && draft.trim()) {
-                  addTask(createScheduledTask(draft.trim()));
-                  setDraft('');
-                }
-              }}
-              className="h-12 rounded-2xl border-slate-200 bg-slate-50"
-              placeholder={t('today.quickAdd')}
-            />
-            <Button data-testid="today-quick-add-button" className="h-12 rounded-2xl px-5" onClick={() => { if (!draft.trim()) return; addTask(createScheduledTask(draft.trim())); setDraft(''); }}>
-              <Plus size={16} className="mr-2" />
-              {t('today.addTask')}
-            </Button>
           </div>
         </section>
-
-        <section className="grid gap-6 2xl:grid-cols-[minmax(460px,1.75fr)_minmax(320px,1fr)]">
-          <div className="space-y-6">
-            <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="mb-4 flex items-center justify-between gap-4">
-                <div>
-                  <h3 className="text-lg font-black text-slate-900">{t('today.list')}</h3>
-                  <p className="text-sm text-slate-500">{t('today.list.desc')}</p>
-                </div>
-                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">{t('today.todoCount', { count: todayTasks.filter((task) => task.status === 'todo').length })}</span>
-              </div>
-              <div className="space-y-3">
-                {todayTasks.length === 0 ? (
-                  <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50/60 p-10 text-center text-sm text-slate-400">{t('today.list.empty')}</div>
-                ) : todayTasks.map((task) => (
-                  <TaskRow
-                    key={task.id}
-                    task={task}
-                    listColor={lists.find((list) => list.id === task.listId)?.color || '#2563eb'}
-                    listName={lists.find((list) => list.id === task.listId)?.name || 'Inbox'}
-                    selected={selectedTask?.id === task.id}
-                    onSelect={() => setSelectedTaskId(task.id)}
-                    onToggle={() => updateTask(task.id, { status: task.status === 'done' ? 'todo' : 'done', completedAt: task.status === 'done' ? undefined : new Date().toISOString() })}
-                    onFocus={() => startFocus(task.id)}
-                    priorityLabel={priorityLabel}
-                    startFocusLabel={t('today.startFocus')}
-                    scheduleLabel={t('today.schedule')}
-                  />
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="mb-4 flex items-center justify-between gap-4">
-                <div>
-                  <h3 className="text-lg font-black text-slate-900">{t('today.backlog')}</h3>
-                  <p className="text-sm text-slate-500">{t('today.backlog.desc')}</p>
-                </div>
-                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">{backlogTasks.length}</span>
-              </div>
-
-              <div className="mb-4 flex gap-3">
-                <Input
-                  value={backlogDraft}
-                  data-testid="backlog-quick-add-input"
-                  onChange={(event) => setBacklogDraft(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && backlogDraft.trim()) {
-                      addTask(createBacklogTask(backlogDraft.trim()));
-                      setBacklogDraft('');
-                    }
-                  }}
-                  className="h-12 rounded-2xl border-slate-200 bg-slate-50"
-                  placeholder={t('today.backlogPlaceholder')}
-                />
-                <Button data-testid="backlog-quick-add-button" variant="outline" className="h-12 rounded-2xl px-5" onClick={() => { if (!backlogDraft.trim()) return; addTask(createBacklogTask(backlogDraft.trim())); setBacklogDraft(''); }}>
-                  <Plus size={16} className="mr-2" />
-                  {t('today.addBacklog')}
-                </Button>
-              </div>
-
-              <div className="space-y-3">
-                {backlogTasks.length === 0 ? (
-                  <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50/60 p-10 text-center text-sm text-slate-400">{t('today.backlog.empty')}</div>
-                ) : backlogTasks.map((task) => (
-                  <TaskRow
-                    key={task.id}
-                    task={task}
-                    listColor={lists.find((list) => list.id === task.listId)?.color || '#2563eb'}
-                    listName={lists.find((list) => list.id === task.listId)?.name || 'Inbox'}
-                    selected={selectedTask?.id === task.id}
-                    onSelect={() => setSelectedTaskId(task.id)}
-                    onToggle={() => updateTask(task.id, { status: task.status === 'done' ? 'todo' : 'done', completedAt: task.status === 'done' ? undefined : new Date().toISOString() })}
-                    onFocus={() => startFocus(task.id)}
-                    onSchedule={() => openScheduleDialog(task)}
-                    priorityLabel={priorityLabel}
-                    startFocusLabel={t('today.startFocus')}
-                    scheduleLabel={t('today.schedule')}
-                    showSchedule
-                  />
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-1">
-            <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="flex items-center gap-2 text-sm font-black text-slate-900"><Sparkles size={16} className="text-primary" />{t('today.weekFocus')}</div>
-              <div className="mt-4 space-y-3 text-sm text-slate-600">
-                {currentWeekPlan?.goals.length ? currentWeekPlan.goals.slice(0, 4).map((goal) => (
-                  <div key={goal.id} className="rounded-2xl bg-slate-50 p-3">
-                    <div className="font-semibold text-slate-800">{goal.text}</div>
-                    <div className="mt-1 text-xs text-slate-500">{goal.taskIds.length} tasks, {goal.isCompleted ? t('status.done') : t('status.todo')}</div>
-                  </div>
-                )) : <p className="rounded-2xl bg-slate-50 p-3 text-sm text-slate-500">{t('today.weekFocus.empty')}</p>}
-              </div>
-            </section>
-
-            <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="flex items-center gap-2 text-sm font-black text-slate-900"><CalendarClock size={16} className="text-primary" />{t('today.upcoming')}</div>
-              <div className="mt-4 space-y-3 text-sm text-slate-600">
-                {upcomingTasks.length ? upcomingTasks.map((task) => (
-                  <div key={task.id} className="rounded-2xl bg-slate-50 p-3">
-                    <div className="font-semibold text-slate-800">{task.title}</div>
-                    <div className="mt-1 text-xs text-slate-500">{getTaskDateLabel(task)}</div>
-                  </div>
-                )) : <p className="rounded-2xl bg-slate-50 p-3 text-sm text-slate-500">{t('today.upcoming.empty')}</p>}
-              </div>
-            </section>
-
-            <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="text-sm font-black text-slate-900">{t('today.goalProgress')}</div>
-              <div className="mt-4 space-y-3">
-                {currentQuarterGoals.slice(0, 3).map((goal) => (
-                  <div key={goal.id} className="rounded-2xl bg-slate-50 p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="font-semibold text-slate-800">{goal.title}</span>
-                      <span className="text-xs font-semibold text-primary">{goal.progress}%</span>
-                    </div>
-                    <div className="mt-2 h-2 rounded-full bg-slate-200"><div className="h-2 rounded-full bg-primary" style={{ width: `${goal.progress}%` }} /></div>
-                  </div>
-                ))}
-                {!currentQuarterGoals.length && <p className="rounded-2xl bg-slate-50 p-3 text-sm text-slate-500">{t('today.goalProgress.empty')}</p>}
-              </div>
-            </section>
-          </div>
-        </section>
+        <div className="min-h-0 flex-1">
+          <CalendarView />
+        </div>
       </div>
+    );
+  }
 
-      <aside className="min-h-0 overflow-y-auto rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex items-center justify-between">
+  return (
+    <div className="space-y-6">
+      <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">{t('today.details')}</p>
-            <h3 className="mt-2 text-xl font-black text-slate-900">{selectedTask?.title || t('today.selectTask')}</h3>
+            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">{copy.headerEyebrow}</p>
+            <h2 className="mt-2 text-3xl font-black tracking-tight text-slate-900">{copy.title}</h2>
+            <p className="mt-2 text-sm text-slate-500">{copy.headerDescription}</p>
+          </div>
+          <div className="flex gap-3">
+            <div className="rounded-2xl bg-slate-50 px-4 py-3">
+              <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{copy.committed}</div>
+              <div className="mt-2 text-2xl font-black text-slate-900">{todayTasks.length}</div>
+            </div>
+            <div className="rounded-2xl bg-orange-50 px-4 py-3">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.24em] text-orange-700">
+                <Flame size={14} />
+                {copy.highlight}
+              </div>
+              <div className="mt-2 text-sm font-semibold text-slate-900">{highlightTask?.title || copy.noHighlightChosen}</div>
+            </div>
           </div>
         </div>
-        {selectedTask ? (
-          <div className="mt-6 space-y-4">
-            <div className="rounded-2xl bg-slate-50 p-4">
-              <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{t('today.time')}</div>
-              <div className="mt-2 text-sm text-slate-700">{getTaskDateLabel(selectedTask)}</div>
-            </div>
-            <div className="rounded-2xl bg-slate-50 p-4">
-              <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{t('calendar.priority')}</div>
-              <div className="mt-2"><span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700">{priorityLabel[selectedTask.priority]}</span></div>
-            </div>
-            <div className="rounded-2xl bg-slate-50 p-4">
-              <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{t('today.notes')}</div>
-              <textarea value={selectedTask.notes || ''} data-testid="today-task-notes" onChange={(event) => updateTask(selectedTask.id, { notes: event.target.value })} className="mt-2 min-h-[120px] w-full resize-none rounded-2xl border border-slate-200 bg-white p-3 text-sm outline-none" placeholder={t('calendar.taskNotes')} />
-            </div>
-            <div className="rounded-2xl bg-slate-50 p-4">
-              <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{t('today.links')}</div>
-              <div className="mt-3 space-y-2 text-sm text-slate-600">
-                <div>{selectedTask.linkedGoalIds.length} {t('nav.goals')}</div>
-                <div>{selectedTask.linkedWeeklyGoalIds.length} {t('weeklyPlan.goals')}</div>
-                <div>{selectedTask.pomodoroSessions} / {selectedTask.pomodoroMinutes} min</div>
+        <div className="mt-5 flex gap-2">
+          <Button data-testid="today-view-plan" className="rounded-2xl" onClick={() => setView('plan')}>{copy.planningBoard}</Button>
+          <Button data-testid="today-view-calendar" variant="outline" className="rounded-2xl" onClick={() => setView('calendar')}>{copy.calendar}</Button>
+        </div>
+      </section>
+
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_380px]">
+        <div className="space-y-6">
+          <WorkflowSuggestionCard
+            testId="today-ai-plan"
+            title={copy.aiPlanTitle}
+            description={copy.aiPlanDescription}
+            placeholder={copy.aiPlanPlaceholder}
+            promptPrefix="You are planning today. Prefer actionPreview type plan_today. Use existing task ids from the provided context. Choose one highlightTaskId and up to two supportTaskIds. Keep the explanation concise."
+            onApplyPreview={applyActionPreview}
+          />
+
+          <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-black text-slate-900">{copy.highlightTitle}</h3>
+                <p className="text-sm text-slate-500">{copy.highlightDescription}</p>
+              </div>
+              <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
+                {copy.doneCount(completedToday)}
               </div>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Button data-testid="today-detail-complete" variant={selectedTask.status === 'done' ? 'outline' : 'default'} className="h-11 w-full rounded-2xl" onClick={() => updateTask(selectedTask.id, { status: selectedTask.status === 'done' ? 'todo' : 'done', completedAt: selectedTask.status === 'done' ? undefined : new Date().toISOString() })}>
-                {selectedTask.status === 'done' ? t('today.restoreTodo') : t('today.markDone')}
-              </Button>
-              {isTaskBacklog(selectedTask) ? (
-                <Button data-testid="today-detail-schedule" className="h-11 w-full rounded-2xl" onClick={() => openScheduleDialog(selectedTask)}>
-                  {t('today.schedule')}
-                </Button>
-              ) : (
-                <Button data-testid="today-bind-focus" className="h-11 w-full rounded-2xl" onClick={() => startFocus(selectedTask.id)}>
-                  {t('today.bindFocus')}
-                </Button>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="mt-8 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-400">{t('today.details.empty')}</div>
-        )}
-      </aside>
+            {highlightTask ? (
+              <div className="rounded-[28px] border border-primary/20 bg-primary/5 p-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-[0.24em] text-primary">{copy.highlight}</div>
+                    <div className="mt-2 text-2xl font-black text-slate-900">{highlightTask.title}</div>
+                    <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-600">
+                      {highlightTask.estimatedMinutes && <span className="rounded-full bg-white px-2 py-1">{copy.estimateMinutes(highlightTask.estimatedMinutes)}</span>}
+                      {highlightTask.taskType && <span className="rounded-full bg-white px-2 py-1">{copy.taskTypeLabels[highlightTask.taskType]}</span>}
+                      <span className="rounded-full bg-white px-2 py-1">{copy.planningStateLabels[getPlanningState(highlightTask)]}</span>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button data-testid="today-highlight-schedule" variant="outline" className="rounded-2xl" onClick={() => openScheduleDialog(highlightTask)}>{copy.taskChip.schedule}</Button>
+                    <Button data-testid="today-highlight-start" className="rounded-2xl" onClick={() => startFocus(highlightTask.id)}>{copy.startFocus}</Button>
+                    <Button data-testid="today-highlight-complete" variant="outline" className="rounded-2xl" onClick={() => completeTask(highlightTask)}>
+                      {highlightTask.status === 'done' ? copy.restore : copy.done}
+                    </Button>
+                  </div>
+                </div>
+                <textarea
+                  value={highlightTask.notes || ''}
+                  onChange={(event) => updateTask(highlightTask.id, { notes: event.target.value })}
+                  className="mt-4 min-h-[96px] w-full rounded-2xl border border-slate-200 bg-white p-3 text-sm outline-none"
+                  placeholder={copy.highlightNotesPlaceholder}
+                />
+              </div>
+            ) : (
+              <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-10 text-center text-sm text-slate-400">
+                <div>{copy.highlightEmpty}</div>
+              </div>
+            )}
+          </section>
 
-      <Dialog open={Boolean(scheduleTaskId)} onOpenChange={(open) => { if (!open) setScheduleTaskId(null); }}>
+          <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="mb-4">
+              <h3 className="text-lg font-black text-slate-900">{copy.supportTasksTitle}</h3>
+              <p className="text-sm text-slate-500">{copy.supportTasksDescription}</p>
+            </div>
+            <div className="space-y-3">
+              {supportTasks.length === 0 && (
+                <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">{copy.supportTasksEmpty}</div>
+              )}
+              {supportTasks.map((task) => (
+                <TaskChip
+                  key={task.id}
+                  task={task}
+                  copy={copy}
+                  actions={[
+                    { label: copy.taskChip.highlight, onClick: () => promoteTaskToHighlight(task.id) },
+                    { label: copy.taskChip.later, onClick: () => setTaskPlanningState(task.id, 'later') },
+                    { label: copy.taskChip.schedule, onClick: () => openScheduleDialog(task) },
+                    { label: copy.taskChip.focus, onClick: () => startFocus(task.id) },
+                  ]}
+                />
+              ))}
+            </div>
+          </section>
+
+          <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="mb-4">
+              <h3 className="text-lg font-black text-slate-900">{copy.parkingLotTitle}</h3>
+              <p className="text-sm text-slate-500">{copy.parkingLotDescription}</p>
+            </div>
+            <div className="space-y-3">
+              {parkingLot.length === 0 && (
+                <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">{copy.parkingLotEmpty}</div>
+              )}
+              {parkingLot.map((task) => (
+                <TaskChip
+                  key={task.id}
+                  task={task}
+                  copy={copy}
+                  actions={[
+                    ...(task.planningState === 'later' ? [{ label: copy.taskChip.support, onClick: () => promoteTaskToSupport(task.id) }] : []),
+                    ...(task.planningState === 'today' ? [{ label: copy.taskChip.later, onClick: () => setTaskPlanningState(task.id, 'later') }] : []),
+                    { label: copy.taskChip.highlight, onClick: () => promoteTaskToHighlight(task.id) },
+                    { label: copy.taskChip.schedule, onClick: () => openScheduleDialog(task) },
+                    { label: copy.taskChip.focus, onClick: () => startFocus(task.id) },
+                  ]}
+                />
+              ))}
+            </div>
+          </section>
+        </div>
+
+        <aside className="space-y-6">
+          <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2 text-sm font-black text-slate-900">
+                  <Timer size={16} className="text-primary" />
+                  {focusCopy.title}
+                </div>
+                <p className="mt-2 text-sm text-slate-500">{focusCopy.description}</p>
+              </div>
+              {!isMac ? (
+                <Button variant="outline" className="rounded-2xl" onClick={openFocusCompanion}>
+                  <Monitor size={16} className="mr-2" />
+                  {focusCopy.floatingAction}
+                </Button>
+              ) : null}
+            </div>
+            <div className="mt-4 rounded-[28px] bg-slate-50 p-5">
+              <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{focusCopy.currentTask}</div>
+              <div className="mt-2 text-lg font-semibold text-slate-900">{activeFocusTask?.title || focusCopy.noTask}</div>
+              <div className="mt-5 text-center text-5xl font-black tracking-[-0.06em] text-slate-900" data-testid="today-focus-timer">{timerLabel}</div>
+              <div className="mt-4 text-center text-sm text-slate-500">{focusStatus}</div>
+              <div className="mt-5 flex flex-wrap justify-center gap-2">
+                <Button data-testid="today-focus-toggle" className="rounded-2xl px-5" onClick={toggleTimer}>
+                  {isActive ? <Pause size={16} className="mr-2" /> : <Play size={16} className="mr-2" />}
+                  {isActive ? focusCopy.pause : focusCopy.start}
+                </Button>
+                <Button variant="outline" className="rounded-2xl" onClick={resetTimer}>
+                  <RotateCcw size={16} className="mr-2" />
+                  {focusCopy.reset}
+                </Button>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3">
+              <div className="rounded-[24px] border border-slate-200 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-black text-slate-900">{focusCopy.rhythmTitle}</div>
+                    <p className="mt-1 text-sm text-slate-500">{focusCopy.rhythmDescription}</p>
+                  </div>
+                  <div className="rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
+                    {focusCopy.recommendedBadge}
+                  </div>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {rhythmPresets.map((preset) => {
+                    const isRecommended = preset.focusMinutes === recommendedRhythm.focusMinutes;
+                    const isActivePreset = pomodoroSettings.workDuration === preset.focusMinutes
+                      && pomodoroSettings.shortBreakDuration === preset.shortBreakMinutes;
+
+                    return (
+                      <Button
+                        key={preset.focusMinutes}
+                        variant={isActivePreset ? 'default' : 'outline'}
+                        className="rounded-2xl"
+                        onClick={() => applyRhythmPreset(preset.focusMinutes)}
+                      >
+                        {focusCopy.presetLabel(preset)}
+                        {isRecommended ? ` · ${focusCopy.recommendedBadge}` : ''}
+                        {isActivePreset ? ` · ${focusCopy.activePreset}` : ''}
+                      </Button>
+                    );
+                  })}
+                </div>
+                <div className="mt-3 text-sm text-slate-500">
+                  {mode === 'work' ? focusCopy.recoveryAfter(pomodoroSettings.shortBreakDuration) : focusCopy.recoveryNow}
+                </div>
+              </div>
+
+              <div className="rounded-[24px] border border-slate-200 p-4">
+                <div className="text-sm font-black text-slate-900">{focusCopy.objectiveTitle}</div>
+                <div className="mt-2 text-sm text-slate-600">{focusBrief.objective || focusCopy.defaultObjective}</div>
+                <div className="mt-4 text-sm font-black text-slate-900">{focusCopy.doneSignalTitle}</div>
+                <div className="mt-2 text-sm text-slate-600">{focusBrief.doneSignal || focusCopy.defaultDoneSignal}</div>
+              </div>
+
+              <div className="rounded-[24px] border border-slate-200 p-4">
+                <div className="flex items-center gap-2 text-sm font-black text-slate-900">
+                  <Coffee size={16} className="text-primary" />
+                  {focusCopy.recoveryTitle}
+                </div>
+                <div className="mt-2 text-sm text-slate-600">{focusCopy.recoveryBody(recoveryMinutes)}</div>
+                <div className="mt-4 text-sm font-black text-slate-900">{focusCopy.todayStatsTitle}</div>
+                <div className="mt-2 space-y-1 text-sm text-slate-600">
+                  <div>{focusCopy.todayMinutes(todayStats.minutes)}</div>
+                  <div>{focusCopy.todaySessions(todayStats.sessions)}</div>
+                </div>
+              </div>
+
+              {isMac ? (
+                <div className="rounded-[24px] border border-emerald-200 bg-emerald-50 p-4">
+                  <div className="text-sm font-black text-emerald-900">{focusCopy.menuBarTitle}</div>
+                  <div className="mt-2 text-sm text-emerald-800">{focusCopy.menuBarDescription}</div>
+                </div>
+              ) : null}
+            </div>
+          </section>
+
+          <WorkflowSuggestionCard
+            testId="today-ai-focus"
+            title={copy.aiFocusTitle}
+            description={copy.aiFocusDescription}
+            placeholder={copy.aiFocusPlaceholder(activeFocusTask?.title)}
+            promptPrefix={`You are helping with a deep work session on ${format(new Date(), 'yyyy-MM-dd')}. Prefer actionPreview type schedule_focus_block when suggesting a concrete time block. Otherwise keep advice concise and practical.`}
+            onApplyPreview={applyActionPreview}
+          />
+
+          <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex items-center gap-2 text-sm font-black text-slate-900">
+              <Sparkles size={16} className="text-primary" />
+              {copy.goalContext}
+            </div>
+            <div className="mt-4 space-y-3">
+              {activeGoals.length === 0 && (
+                <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">{copy.noActiveGoals}</div>
+              )}
+              {activeGoals.map((goal) => (
+                <div key={goal.id} className="rounded-2xl bg-slate-50 p-4">
+                  <div className="font-semibold text-slate-800">{goal.title}</div>
+                  <div className="mt-2 text-xs text-slate-500">{copy.goalProgress(goal.progress)}</div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </aside>
+      </div>
+
+      <Dialog open={Boolean(scheduleTask)} onOpenChange={(open) => { if (!open) setScheduleTask(null); }}>
         <DialogContent className="max-w-[480px] rounded-[28px] border-slate-200 bg-white">
-          <DialogHeader><DialogTitle className="text-2xl font-black text-slate-900">{t('today.scheduleDialog')}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-black text-slate-900">{copy.scheduleDialogTitle}</DialogTitle>
+          </DialogHeader>
           <div className="grid gap-4 py-2">
             <div>
-              <div className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{t('today.scheduleStart')}</div>
-              <Input data-testid="backlog-schedule-start" type="datetime-local" value={scheduleStart} onChange={(event) => setScheduleStart(event.target.value)} className="rounded-2xl border-slate-200 bg-slate-50" />
+              <div className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{copy.scheduleStart}</div>
+              <Input type="datetime-local" value={scheduleStart} onChange={(event) => setScheduleStart(event.target.value)} className="rounded-2xl border-slate-200 bg-slate-50" />
             </div>
             <div>
-              <div className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{t('today.scheduleEnd')}</div>
-              <Input data-testid="backlog-schedule-end" type="datetime-local" value={scheduleEnd} onChange={(event) => setScheduleEnd(event.target.value)} className="rounded-2xl border-slate-200 bg-slate-50" />
+              <div className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{copy.scheduleEnd}</div>
+              <Input type="datetime-local" value={scheduleEnd} onChange={(event) => setScheduleEnd(event.target.value)} className="rounded-2xl border-slate-200 bg-slate-50" />
             </div>
           </div>
           <DialogFooter className="gap-2">
-            <Button variant="outline" className="rounded-2xl" onClick={() => setScheduleTaskId(null)}>{t('common.cancel')}</Button>
-            <Button data-testid="backlog-schedule-save" className="rounded-2xl" onClick={saveSchedule}>{t('today.scheduleSave')}</Button>
+            <Button variant="outline" className="rounded-2xl" onClick={() => setScheduleTask(null)}>{t('common.cancel')}</Button>
+            <Button className="rounded-2xl" onClick={saveSchedule}>{copy.scheduleSave}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

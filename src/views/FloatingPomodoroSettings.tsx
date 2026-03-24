@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { MonitorUp, MoonStar, SunMedium } from 'lucide-react';
+import { getFloatingCopy } from '../content/floatingCopy';
 import { useI18n } from '../i18n';
 
 type FloatingTheme = 'mist' | 'sage' | 'graphite';
@@ -31,7 +32,8 @@ const readPreferences = () => {
 };
 
 const FloatingPomodoroSettings = () => {
-  const { t } = useI18n();
+  const { locale } = useI18n();
+  const copy = getFloatingCopy(locale);
   const [theme, setTheme] = useState<FloatingTheme>('mist');
   const [opacity, setOpacity] = useState(0.96);
 
@@ -57,21 +59,21 @@ const FloatingPomodoroSettings = () => {
       <div className="min-h-full rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">Floating</p>
-            <h2 className="mt-2 text-xl font-black">{t('floatingSettings.title')}</h2>
-            <p className="mt-2 text-sm text-slate-500">{t('floatingSettings.desc')}</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">{copy.eyebrow}</p>
+            <h2 className="mt-2 text-xl font-black">{copy.settings.title}</h2>
+            <p className="mt-2 text-sm text-slate-500">{copy.settings.description}</p>
           </div>
-          <button type="button" className="rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-600" onClick={closeWindow}>{t('floatingSettings.close')}</button>
+          <button type="button" className="rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-600" onClick={closeWindow}>{copy.settings.close}</button>
         </div>
 
         <div className="mt-6 space-y-6">
           <section>
-            <div className="text-sm font-semibold text-slate-700">{t('floatingSettings.theme')}</div>
+            <div className="text-sm font-semibold text-slate-700">{copy.settings.theme}</div>
             <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
               {([
-                { id: 'mist', label: t('floatingSettings.theme.mist'), description: t('floatingSettings.theme.mistDesc'), icon: SunMedium },
-                { id: 'sage', label: t('floatingSettings.theme.sage'), description: t('floatingSettings.theme.sageDesc'), icon: MonitorUp },
-                { id: 'graphite', label: t('floatingSettings.theme.graphite'), description: t('floatingSettings.theme.graphiteDesc'), icon: MoonStar },
+                { id: 'mist', label: copy.settings.themes.mist.label, description: copy.settings.themes.mist.description, icon: SunMedium },
+                { id: 'sage', label: copy.settings.themes.sage.label, description: copy.settings.themes.sage.description, icon: MonitorUp },
+                { id: 'graphite', label: copy.settings.themes.graphite.label, description: copy.settings.themes.graphite.description, icon: MoonStar },
               ] as const).map((item) => (
                 <button key={item.id} type="button" data-testid={`floating-theme-${item.id}`} onClick={() => setTheme(item.id)} className={`rounded-2xl border px-4 py-4 text-left text-sm transition ${theme === item.id ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300'}`}>
                   <item.icon size={16} className="mb-3" />
@@ -84,11 +86,11 @@ const FloatingPomodoroSettings = () => {
 
           <section>
             <div className="flex items-center justify-between text-sm font-semibold text-slate-700">
-              <span>{t('floatingSettings.opacity')}</span>
+              <span>{copy.settings.opacity}</span>
               <span data-testid="floating-opacity-label">{Math.round(opacity * 100)}%</span>
             </div>
             <input data-testid="floating-opacity-input" type="range" min="0.45" max="1" step="0.05" value={opacity} onChange={(event) => setOpacity(Number(event.target.value))} className="mt-3 w-full accent-slate-900" />
-            <p className="mt-2 text-xs text-slate-500">{t('floatingSettings.opacityHint')}</p>
+            <p className="mt-2 text-xs text-slate-500">{copy.settings.opacityHint}</p>
           </section>
         </div>
       </div>

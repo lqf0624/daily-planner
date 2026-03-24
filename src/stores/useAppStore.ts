@@ -50,6 +50,13 @@ type AppStoreState = {
   importData: (data: Partial<AppStoreState>) => void;
   addTask: (task: Task) => void;
   updateTask: (id: string, updates: Partial<Task>) => void;
+  setTaskPlanningState: (id: string, planningState: Task['planningState']) => void;
+  setTaskEstimate: (id: string, estimatedMinutes: Task['estimatedMinutes']) => void;
+  setTaskType: (id: string, taskType: Task['taskType']) => void;
+  promoteTaskToHighlight: (id: string | null) => void;
+  promoteTaskToSupport: (id: string) => void;
+  applyTodayPlan: (highlightTaskId: string | null, supportTaskIds: string[]) => void;
+  applySuggestedShutdown: (payload: { completeTaskIds?: string[]; carryForwardTaskIds?: string[]; dropTaskIds?: string[] }) => void;
   syncTaskRelations: (taskId: string, linkedGoalIds: string[], linkedWeeklyGoalIds: string[]) => void;
   deleteTask: (id: string) => void;
   addList: (list: PlannerList) => void;
@@ -84,6 +91,13 @@ const initialState: Omit<
   | 'importData'
   | 'addTask'
   | 'updateTask'
+  | 'setTaskPlanningState'
+  | 'setTaskEstimate'
+  | 'setTaskType'
+  | 'promoteTaskToHighlight'
+  | 'promoteTaskToSupport'
+  | 'applyTodayPlan'
+  | 'applySuggestedShutdown'
   | 'syncTaskRelations'
   | 'deleteTask'
   | 'addList'
@@ -127,6 +141,7 @@ const initialState: Omit<
 };
 
 const legacyStorageKeys = [
+  'daily-planner-storage-v7',
   'daily-planner-storage-v6',
   'daily-planner-storage-v5',
   'daily-planner-storage',
@@ -198,6 +213,100 @@ export const useAppStore = create<AppStoreState>()(
         tasks: state.tasks.map((task) => task.id === id
           ? { ...task, ...updates, updatedAt: nowIso() }
           : task),
+      })),
+      setTaskPlanningState: (id, planningState) => set((state) => ({
+        tasks: state.tasks.map((task) => task.id === id
+          ? {
+              ...task,
+              planningState,
+              isHighlight: planningState !== 'today' ? false : task.isHighlight,
+              updatedAt: nowIso(),
+            }
+          : task),
+      })),
+      setTaskEstimate: (id, estimatedMinutes) => set((state) => ({
+        tasks: state.tasks.map((task) => task.id === id
+          ? { ...task, estimatedMinutes, updatedAt: nowIso() }
+          : task),
+      })),
+      setTaskType: (id, taskType) => set((state) => ({
+        tasks: state.tasks.map((task) => task.id === id
+          ? { ...task, taskType, updatedAt: nowIso() }
+          : task),
+      })),
+      promoteTaskToHighlight: (id) => set((state) => ({
+        tasks: state.tasks.map((task) => ({
+          ...task,
+          planningState: task.id === id ? 'today' : task.planningState,
+          isHighlight: task.id === id,
+          updatedAt: task.id === id || task.isHighlight ? nowIso() : task.updatedAt,
+        })),
+      })),
+      promoteTaskToSupport: (id) => set((state) => {
+        const task = state.tasks.find((item) => item.id === id);
+        if (!task) return state;
+
+        const updatedTask: Task = {
+          ...task,
+          planningState: 'today',
+          isHighlight: false,
+          updatedAt: nowIso(),
+        };
+
+        const remainingTasks = state.tasks.filter((item) => item.id !== id);
+        const highlightIndex = remainingTasks.findIndex((item) => item.isHighlight);
+        const insertIndex = highlightIndex >= 0 ? highlightIndex + 1 : 0;
+        const tasks = [...remainingTasks];
+        tasks.splice(insertIndex, 0, updatedTask);
+
+        return { tasks };
+      }),
+      applyTodayPlan: (highlightTaskId, supportTaskIds) => set((state) => ({
+        tasks: state.tasks.map((task) => {
+          const plannedToday = task.id === highlightTaskId || supportTaskIds.includes(task.id);
+          return {
+            ...task,
+            planningState: plannedToday ? 'today' : task.planningState,
+            isHighlight: task.id === highlightTaskId,
+            updatedAt: plannedToday || task.id === highlightTaskId || task.isHighlight ? nowIso() : task.updatedAt,
+          };
+        }),
+      })),
+      applySuggestedShutdown: (payload) => set((state) => ({
+        tasks: state.tasks.map((task) => {
+          if (payload.completeTaskIds?.includes(task.id)) {
+            return {
+              ...task,
+              status: 'done',
+              completedAt: task.completedAt || nowIso(),
+              reviewStatus: 'pending',
+              updatedAt: nowIso(),
+            };
+          }
+
+          if (payload.carryForwardTaskIds?.includes(task.id)) {
+            return {
+              ...task,
+              planningState: 'later',
+              isHighlight: false,
+              reviewStatus: 'carried_forward',
+              updatedAt: nowIso(),
+            };
+          }
+
+          if (payload.dropTaskIds?.includes(task.id)) {
+            return {
+              ...task,
+              status: 'archived',
+              planningState: 'later',
+              isHighlight: false,
+              reviewStatus: 'dropped',
+              updatedAt: nowIso(),
+            };
+          }
+
+          return task;
+        }),
       })),
       syncTaskRelations: (taskId, linkedGoalIds, linkedWeeklyGoalIds) => set((state) => ({
         goals: state.goals.map((goal) => ({
@@ -357,7 +466,7 @@ export const useAppStore = create<AppStoreState>()(
       clearChatHistory: () => set({ chatHistory: [] }),
     }),
     {
-      name: 'daily-planner-storage-v7',
+      name: 'daily-planner-storage-v8',
       version: STORE_VERSION,
       storage: persistedStorage,
       migrate: (persistedState) => migrateStore(persistedState),

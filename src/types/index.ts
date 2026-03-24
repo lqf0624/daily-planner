@@ -2,6 +2,12 @@ export type TaskStatus = 'todo' | 'done' | 'archived';
 
 export type TaskPriority = 'low' | 'medium' | 'high';
 
+export type TaskPlanningState = 'inbox' | 'today' | 'later';
+
+export type TaskType = 'deep' | 'shallow' | 'personal';
+
+export type TaskReviewStatus = 'pending' | 'carried_forward' | 'dropped';
+
 export type RecurrenceFrequency = 'none' | 'daily' | 'weekly' | 'monthly';
 
 export interface TaskRecurrence {
@@ -20,6 +26,11 @@ export interface Task {
   title: string;
   notes?: string;
   status: TaskStatus;
+  planningState?: TaskPlanningState;
+  estimatedMinutes?: 15 | 30 | 60 | 90;
+  taskType?: TaskType;
+  isHighlight?: boolean;
+  reviewStatus?: TaskReviewStatus;
   scheduledStart?: string;
   scheduledEnd?: string;
   dueAt?: string;
@@ -140,7 +151,17 @@ export interface AISettings {
 }
 
 export interface AIActionPreview {
-  type: 'create_task' | 'update_task' | 'create_weekly_plan' | 'draft_weekly_report';
+  type:
+    | 'create_task'
+    | 'update_task'
+    | 'create_weekly_plan'
+    | 'draft_weekly_report'
+    | 'triage_inbox'
+    | 'plan_today'
+    | 'schedule_focus_block'
+    | 'defer_task'
+    | 'promote_to_highlight'
+    | 'suggest_shutdown';
   payload: Record<string, unknown>;
   summary: string;
 }

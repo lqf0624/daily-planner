@@ -12,39 +12,45 @@ export type AssistantResponse = {
 const MAX_HISTORY_MESSAGES = 12;
 
 const actionSchema = `
-可选 actionPreview:
-- create_task: { "title": "...", "date": "YYYY-MM-DD", "startTime": "HH:mm", "endTime": "HH:mm", "priority": "low|medium|high", "notes": "..." }
-- update_task: { "taskId": "...", "title": "...", "date": "YYYY-MM-DD", "startTime": "HH:mm", "endTime": "HH:mm", "priority": "low|medium|high", "notes": "..." }
+Available actionPreview types:
+- create_task: { "title": "...", "date": "YYYY-MM-DD", "startTime": "HH:mm", "endTime": "HH:mm", "priority": "low|medium|high", "notes": "...", "estimatedMinutes": 15|30|60|90, "taskType": "deep|shallow|personal", "planningState": "inbox|today|later" }
+- update_task: { "taskId": "...", "title": "...", "date": "YYYY-MM-DD", "startTime": "HH:mm", "endTime": "HH:mm", "priority": "low|medium|high", "notes": "...", "estimatedMinutes": 15|30|60|90, "taskType": "deep|shallow|personal", "planningState": "inbox|today|later" }
+- triage_inbox: { "tasks": [{ "title": "...", "notes": "...", "estimatedMinutes": 15|30|60|90, "taskType": "deep|shallow|personal", "planningState": "inbox|today|later" }] }
+- plan_today: { "highlightTaskId": "task-id", "supportTaskIds": ["task-id-1", "task-id-2"] }
+- schedule_focus_block: { "taskId": "task-id", "date": "YYYY-MM-DD", "startTime": "HH:mm", "endTime": "HH:mm", "notes": "..." }
+- defer_task: { "taskId": "task-id", "planningState": "later|inbox" }
+- promote_to_highlight: { "taskId": "task-id" }
+- suggest_shutdown: { "completeTaskIds": ["task-id"], "carryForwardTaskIds": ["task-id"], "dropTaskIds": ["task-id"] }
 - create_weekly_plan: { "goals": [{ "text": "...", "priority": "high|medium|low" }], "notes": "...", "focusAreas": ["..."], "riskNotes": "..." }
 - draft_weekly_report: { "summary": "...", "wins": "...", "blockers": "...", "adjustments": "..." }
 `;
 
 const buildSystemPrompt = (message: string, dataJson: string) => `
-你是个人日程管理副驾，负责帮助用户做任务规划、番茄执行和周报复盘。
-今天是 ${format(new Date(), 'yyyy-MM-dd')}.
+You are an AI copilot for a personal planning app. Today is ${format(new Date(), 'yyyy-MM-dd')}.
 
-回答要求：
-1. 默认输出简洁、可执行的中文建议。
-2. 如果你建议用户直接把结果写入系统，请额外返回 actionPreview。
-3. actionPreview 只返回一个，且必须适配下面 schema。
-4. 如果信息不足，就明确说缺少什么，不要胡乱编造。
+Response rules:
+1. Reply in concise, practical Chinese by default.
+2. If a concrete state change should be suggested, return exactly one actionPreview.
+3. Never invent task ids that are not present in the context data.
+4. If context is missing, explain what is missing instead of guessing.
+5. Match this workflow style: Inbox capture, one highlight, up to two support tasks, explicit focus blocks, and a clean shutdown ritual.
 
-返回格式必须是严格 JSON：
+The full response must be strict JSON:
 {
-  "content": "给用户看的中文回复",
+  "content": "user-facing Chinese response",
   "actionPreview": {
-    "type": "create_task | update_task | create_weekly_plan | draft_weekly_report",
-    "summary": "一句话说明会应用什么",
+    "type": "one allowed action type",
+    "summary": "one-line summary",
     "payload": {}
   }
 }
 
 ${actionSchema}
 
-用户问题：
+User request:
 ${message}
 
-上下文数据：
+Context data:
 ${dataJson}
 `.trim();
 

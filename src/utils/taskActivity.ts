@@ -28,6 +28,21 @@ export const getTaskEnd = (task: Task) => {
 
 export const isTaskBacklog = (task: Task) => !task.scheduledStart && !task.dueAt;
 
+export const getPlanningState = (task: Task): NonNullable<Task['planningState']> => {
+  if (task.planningState) return task.planningState;
+  if (isTaskBacklog(task)) return 'inbox';
+
+  const displayDate = getTaskDisplayDate(task);
+  const today = format(new Date(), 'yyyy-MM-dd');
+  return displayDate <= today ? 'today' : 'later';
+};
+
+export const isInboxTask = (task: Task) => task.status === 'todo' && getPlanningState(task) === 'inbox';
+
+export const isTodayTask = (task: Task) => task.status === 'todo' && getPlanningState(task) === 'today';
+
+export const isLaterTask = (task: Task) => task.status === 'todo' && getPlanningState(task) === 'later';
+
 export const getTaskDisplayDate = (task: Task) => {
   const start = getTaskStart(task);
   if (start) return format(start, 'yyyy-MM-dd');

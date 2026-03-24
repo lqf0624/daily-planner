@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { type MouseEvent as ReactMouseEvent, useEffect, useMemo, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { EyeOff, FastForward, PanelTop, Pause, Play, RotateCcw } from 'lucide-react';
+import { getFloatingCopy } from '../content/floatingCopy';
 import { useI18n } from '../i18n';
 import { usePomodoro } from '../contexts/PomodoroContext';
 import { useHoldAction } from '../hooks/useHoldAction';
@@ -22,11 +23,86 @@ const themeStyles: Record<FloatingTheme, { button: string; text: string; subtle:
   graphite: { button: 'border-slate-300 bg-white/82 text-slate-700 hover:bg-white', text: 'text-slate-900', subtle: 'text-slate-600' },
 };
 
-const modePalette = {
-  work: { standard: 'linear-gradient(180deg, rgba(236,253,245,0.98) 0%, rgba(209,250,229,0.98) 100%)', mini: 'linear-gradient(180deg, rgba(240,253,250,0.98) 0%, rgba(204,251,241,0.98) 100%)', border: '#6ee7b7', accent: '#0f766e' },
-  shortBreak: { standard: 'linear-gradient(180deg, rgba(255,247,237,0.98) 0%, rgba(254,215,170,0.98) 100%)', mini: 'linear-gradient(180deg, rgba(255,251,235,0.98) 0%, rgba(253,230,138,0.98) 100%)', border: '#fbbf24', accent: '#d97706' },
-  longBreak: { standard: 'linear-gradient(180deg, rgba(245,243,255,0.98) 0%, rgba(221,214,254,0.98) 100%)', mini: 'linear-gradient(180deg, rgba(245,243,255,0.98) 0%, rgba(196,181,253,0.98) 100%)', border: '#a78bfa', accent: '#7c3aed' },
-} as const;
+const themedPalettes: Record<FloatingTheme, Record<'work' | 'shortBreak' | 'longBreak', { standard: string; mini: string; border: string; accent: string; shell: string; menu: string }>> = {
+  mist: {
+    work: {
+      standard: 'linear-gradient(180deg, rgba(236,253,245,0.98) 0%, rgba(209,250,229,0.98) 100%)',
+      mini: 'linear-gradient(180deg, rgba(240,253,250,0.98) 0%, rgba(204,251,241,0.98) 100%)',
+      border: '#6ee7b7',
+      accent: '#0f766e',
+      shell: '#eef3f8',
+      menu: 'border-slate-200 bg-white',
+    },
+    shortBreak: {
+      standard: 'linear-gradient(180deg, rgba(255,247,237,0.98) 0%, rgba(254,215,170,0.98) 100%)',
+      mini: 'linear-gradient(180deg, rgba(255,251,235,0.98) 0%, rgba(253,230,138,0.98) 100%)',
+      border: '#fbbf24',
+      accent: '#d97706',
+      shell: '#f7f3ee',
+      menu: 'border-slate-200 bg-white',
+    },
+    longBreak: {
+      standard: 'linear-gradient(180deg, rgba(245,243,255,0.98) 0%, rgba(221,214,254,0.98) 100%)',
+      mini: 'linear-gradient(180deg, rgba(245,243,255,0.98) 0%, rgba(196,181,253,0.98) 100%)',
+      border: '#a78bfa',
+      accent: '#7c3aed',
+      shell: '#f1eff7',
+      menu: 'border-slate-200 bg-white',
+    },
+  },
+  sage: {
+    work: {
+      standard: 'linear-gradient(180deg, rgba(236,253,244,0.98) 0%, rgba(187,247,208,0.98) 100%)',
+      mini: 'linear-gradient(180deg, rgba(240,253,244,0.98) 0%, rgba(167,243,208,0.98) 100%)',
+      border: '#4ade80',
+      accent: '#166534',
+      shell: '#edf7f1',
+      menu: 'border-emerald-200 bg-emerald-50/95',
+    },
+    shortBreak: {
+      standard: 'linear-gradient(180deg, rgba(254,252,232,0.98) 0%, rgba(254,240,138,0.98) 100%)',
+      mini: 'linear-gradient(180deg, rgba(254,252,232,0.98) 0%, rgba(253,224,71,0.98) 100%)',
+      border: '#facc15',
+      accent: '#a16207',
+      shell: '#f7f8ee',
+      menu: 'border-emerald-200 bg-emerald-50/95',
+    },
+    longBreak: {
+      standard: 'linear-gradient(180deg, rgba(236,253,245,0.98) 0%, rgba(167,243,208,0.98) 100%)',
+      mini: 'linear-gradient(180deg, rgba(236,253,245,0.98) 0%, rgba(110,231,183,0.98) 100%)',
+      border: '#34d399',
+      accent: '#047857',
+      shell: '#eef8f2',
+      menu: 'border-emerald-200 bg-emerald-50/95',
+    },
+  },
+  graphite: {
+    work: {
+      standard: 'linear-gradient(180deg, rgba(248,250,252,0.98) 0%, rgba(226,232,240,0.98) 100%)',
+      mini: 'linear-gradient(180deg, rgba(248,250,252,0.98) 0%, rgba(203,213,225,0.98) 100%)',
+      border: '#94a3b8',
+      accent: '#334155',
+      shell: '#e8edf3',
+      menu: 'border-slate-300 bg-slate-50/95',
+    },
+    shortBreak: {
+      standard: 'linear-gradient(180deg, rgba(250,250,249,0.98) 0%, rgba(231,229,228,0.98) 100%)',
+      mini: 'linear-gradient(180deg, rgba(250,250,249,0.98) 0%, rgba(214,211,209,0.98) 100%)',
+      border: '#a8a29e',
+      accent: '#57534e',
+      shell: '#f1efed',
+      menu: 'border-slate-300 bg-slate-50/95',
+    },
+    longBreak: {
+      standard: 'linear-gradient(180deg, rgba(245,245,244,0.98) 0%, rgba(214,211,209,0.98) 100%)',
+      mini: 'linear-gradient(180deg, rgba(245,245,244,0.98) 0%, rgba(168,162,158,0.98) 100%)',
+      border: '#a8a29e',
+      accent: '#44403c',
+      shell: '#ece9e7',
+      menu: 'border-slate-300 bg-slate-50/95',
+    },
+  },
+};
 
 const isTauriWindowAvailable = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 const buildHoldRing = (progress: number, color: string) => `conic-gradient(${color} ${progress * 360}deg, rgba(255,255,255,0.34) 0deg)`;
@@ -69,7 +145,8 @@ const readBoundTaskNameFromStorage = () => {
 };
 
 const FloatingPomodoro = () => {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
+  const copy = getFloatingCopy(locale);
   const { timeLeft, isActive, mode, toggleTimer, resetTimer, skipMode, currentTaskName } = usePomodoro();
   const { tasks, currentTaskId } = useAppStore();
   const currentTask = tasks.find((task) => task.id === currentTaskId);
@@ -90,10 +167,10 @@ const FloatingPomodoro = () => {
   const minutes = Math.floor(timeLeft / 60).toString().padStart(2, '0');
   const seconds = (timeLeft % 60).toString().padStart(2, '0');
   const styles = themeStyles[theme];
-  const palette = modePalette[mode];
-  const displayTaskName = currentTaskName || currentTask?.title || boundTaskName || t('pomodoro.unbound');
+  const palette = themedPalettes[theme][mode];
+  const displayTaskName = currentTaskName || currentTask?.title || boundTaskName || copy.labels.unboundTask;
   const modeLabel = mode === 'work' ? t('pomodoro.work') : mode === 'shortBreak' ? t('pomodoro.shortBreak') : t('pomodoro.longBreak');
-  const compactModeLabel = mode === 'work' ? t('floating.focus') : t('floating.break');
+  const compactModeLabel = mode === 'work' ? copy.labels.focus : copy.labels.break;
   const holdSkip = useHoldAction({ onComplete: skipMode });
 
   useEffect(() => {
@@ -198,9 +275,15 @@ const FloatingPomodoro = () => {
 
   const switchMode = (nextMode: FloatingMode) => {
     setFloatingMode(nextMode);
+    setMenu(null);
     if (!appWindow) return;
     const nextSize = readFloatingSize(nextMode);
     invoke('open_floating_mode', { mode: nextMode, width: nextSize.width, height: nextSize.height }).catch(() => undefined);
+  };
+
+  const openMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setMenu({ x: event.clientX, y: event.clientY });
   };
 
   const menuPosition = (menuState: MenuState, menuWidth: number, menuHeight: number) => ({
@@ -213,10 +296,10 @@ const FloatingPomodoro = () => {
       <div
         data-testid="floating-shell"
         data-theme={theme}
-        className="h-screen w-screen overflow-visible bg-[#eef3f8]"
-        style={{ opacity }}
+        className="h-screen w-screen overflow-visible"
+        style={{ opacity, background: palette.shell }}
         onClick={() => setMenu(null)}
-        onContextMenu={(event) => { event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY }); }}
+        onContextMenu={openMenu}
       >
         <div data-testid="floating-frame" className="flex h-full w-full items-center gap-2 border px-3 py-2 shadow-[0_10px_24px_rgba(15,23,42,0.12)]" style={{ background: palette.mini, borderColor: palette.border }}>
           <div data-testid="floating-drag-handle" className="min-w-0 flex-1 cursor-grab active:cursor-grabbing" onMouseDown={() => appWindow?.startDragging().catch(() => undefined)}>
@@ -252,12 +335,12 @@ const FloatingPomodoro = () => {
         </div>
 
         {menu && (
-          <div className="absolute z-50 min-w-[168px] rounded-2xl border border-slate-200 bg-white p-1.5 shadow-2xl" style={menuPosition(menu, 176, 126)} onClick={(event) => event.stopPropagation()}>
-            <button type="button" data-testid="floating-menu-standard" className="flex w-full items-center rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100" onClick={() => { setMenu(null); switchMode('standard'); }}>
-              {t('floating.switchStandard')}
+          <div className={`absolute z-50 flex items-center gap-1 rounded-full border px-1.5 py-1 shadow-2xl ${palette.menu}`} style={menuPosition(menu, 178, 40)} onClick={(event) => event.stopPropagation()}>
+            <button type="button" data-testid="floating-menu-standard" className="flex items-center rounded-full px-3 py-1.5 text-[11px] font-medium text-slate-700 transition hover:bg-slate-100" onClick={() => { setMenu(null); switchMode('standard'); }}>
+              {copy.menu.switchStandard}
             </button>
-            <button type="button" data-testid="floating-menu-hide" className="flex w-full items-center rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100" onClick={() => { setMenu(null); closeFloating(); }}>
-              {t('floating.hide')}
+            <button type="button" data-testid="floating-menu-hide" className="flex items-center rounded-full px-3 py-1.5 text-[11px] font-medium text-slate-700 transition hover:bg-slate-100" onClick={() => { setMenu(null); closeFloating(); }}>
+              {copy.menu.hide}
             </button>
           </div>
         )}
@@ -269,10 +352,10 @@ const FloatingPomodoro = () => {
     <div
       data-testid="floating-shell"
       data-theme={theme}
-      className="h-screen w-screen overflow-visible bg-[#eef3f8]"
-      style={{ opacity }}
+      className="h-screen w-screen overflow-visible"
+      style={{ opacity, background: palette.shell }}
       onClick={() => setMenu(null)}
-      onContextMenu={(event) => { event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY }); }}
+      onContextMenu={openMenu}
     >
       <div data-testid="floating-frame" className="h-full w-full border px-3 py-2 shadow-[0_18px_40px_rgba(15,23,42,0.12)]" style={{ background: palette.standard, borderColor: palette.border }}>
         <div data-testid="floating-drag-handle" className="flex cursor-grab items-start justify-between gap-2 active:cursor-grabbing" onMouseDown={() => appWindow?.startDragging().catch(() => undefined)}>
@@ -280,7 +363,7 @@ const FloatingPomodoro = () => {
             <div className={`text-[9px] font-semibold uppercase tracking-[0.24em] ${styles.subtle}`}>{modeLabel}</div>
             <div className={`mt-0.5 truncate text-[13px] font-semibold ${styles.text}`}>{displayTaskName}</div>
           </div>
-          <button type="button" data-testid="floating-hide-button" className={`flex h-8 w-8 items-center justify-center rounded-full border ${styles.button}`} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); closeFloating(); }} title={t('floating.hide')}>
+          <button type="button" data-testid="floating-hide-button" className={`flex h-8 w-8 items-center justify-center rounded-full border ${styles.button}`} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); closeFloating(); }} title={copy.menu.hide}>
             <EyeOff size={14} />
           </button>
         </div>
@@ -308,19 +391,19 @@ const FloatingPomodoro = () => {
           <button type="button" data-testid="floating-mini-switch" className={`flex h-9 items-center justify-center rounded-[14px] border ${styles.button}`} onClick={() => switchMode('mini')}><PanelTop size={14} /></button>
         </div>
 
-        <div className="mt-2 text-center text-[10px] font-medium" style={{ color: palette.accent }}>{t('floating.holdSkip')}</div>
+        <div className="mt-2 text-center text-[10px] font-medium" style={{ color: palette.accent }}>{copy.labels.holdSkip}</div>
       </div>
 
       {menu && (
-        <div className="absolute z-50 min-w-[168px] rounded-2xl border border-slate-200 bg-white p-1.5 shadow-2xl" style={menuPosition(menu, 176, 162)} onClick={(event) => event.stopPropagation()}>
+        <div className={`absolute z-50 min-w-[196px] rounded-2xl border p-1.5 shadow-2xl ${palette.menu}`} style={menuPosition(menu, 204, 162)} onClick={(event) => event.stopPropagation()}>
           <button type="button" data-testid="floating-menu-settings" className="flex w-full items-center rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100" onClick={() => { setMenu(null); invoke('open_floating_settings').catch(() => undefined); }}>
-            {t('floating.appearance')}
+            {copy.menu.appearance}
           </button>
           <button type="button" data-testid="floating-menu-mini" className="flex w-full items-center rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100" onClick={() => { setMenu(null); switchMode('mini'); }}>
-            {t('floating.switchMini')}
+            {copy.menu.switchMini}
           </button>
           <button type="button" data-testid="floating-menu-hide" className="flex w-full items-center rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100" onClick={() => { setMenu(null); closeFloating(); }}>
-            {t('floating.hide')}
+            {copy.menu.hide}
           </button>
         </div>
       )}

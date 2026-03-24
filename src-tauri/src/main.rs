@@ -58,8 +58,8 @@ struct AppState {
 impl Default for PomodoroSettings {
   fn default() -> Self {
     Self {
-      work_duration: 25, short_break_duration: 5, long_break_duration: 15,
-      long_break_interval: 4, auto_start_breaks: true, auto_start_pomodoros: false, 
+      work_duration: 60, short_break_duration: 10, long_break_duration: 20,
+      long_break_interval: 2, auto_start_breaks: true, auto_start_pomodoros: false,
       max_sessions: 8, stop_after_sessions: 0, stop_after_long_break: false,
     }
   }

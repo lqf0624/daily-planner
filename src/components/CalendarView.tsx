@@ -34,6 +34,12 @@ type CalendarViewMode = 'timeGridDay' | 'timeGridWeek' | 'dayGridMonth' | 'listW
 const toLocalDateTime = (date: Date) => format(date, "yyyy-MM-dd'T'HH:mm:ss");
 const toDateTimeInputValue = (value?: string) => (value ? format(parseISO(value), "yyyy-MM-dd'T'HH:mm") : '');
 const normalizeDateTimeInput = (value: string) => (value ? `${value}:00` : undefined);
+const inferPlanningState = (start?: string, dueAt?: string): Task['planningState'] => {
+  if (!start && !dueAt) return 'inbox';
+  const date = parseISO(start || dueAt || new Date().toISOString());
+  const today = format(new Date(), 'yyyy-MM-dd');
+  return format(date, 'yyyy-MM-dd') <= today ? 'today' : 'later';
+};
 
 const createEmptyTask = (): Task => {
   const now = new Date();
@@ -43,6 +49,8 @@ const createEmptyTask = (): Task => {
     id: '',
     title: '',
     status: 'todo',
+    planningState: 'today',
+    reviewStatus: 'pending',
     scheduledStart: `${date}T09:00:00`,
     scheduledEnd: `${date}T10:00:00`,
     dueAt: `${date}T10:00:00`,
@@ -172,6 +180,7 @@ const CalendarView = () => {
       id: draft.id || crypto.randomUUID(),
       createdAt: draft.id ? draft.createdAt : new Date().toISOString(),
       dueAt: draft.scheduledEnd || draft.dueAt || draft.scheduledStart,
+      planningState: inferPlanningState(draft.scheduledStart, draft.scheduledEnd || draft.dueAt),
       completedAt: draft.status === 'done' ? (draft.completedAt || new Date().toISOString()) : undefined,
     };
 
@@ -200,6 +209,7 @@ const CalendarView = () => {
       scheduledStart: start ? toLocalDateTime(start) : undefined,
       scheduledEnd: end ? toLocalDateTime(end) : undefined,
       dueAt: end ? toLocalDateTime(end) : start ? toLocalDateTime(start) : undefined,
+      planningState: inferPlanningState(start ? toLocalDateTime(start) : undefined, end ? toLocalDateTime(end) : start ? toLocalDateTime(start) : undefined),
       allDay,
     });
   };
@@ -251,7 +261,7 @@ const CalendarView = () => {
   };
 
   return (
-    <div className="flex h-full flex-col gap-6">
+    <div className="flex h-full min-h-[720px] flex-col gap-6">
       <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>

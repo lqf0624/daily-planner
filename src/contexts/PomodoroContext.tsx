@@ -44,6 +44,7 @@ const isTauriRuntime = () => typeof window !== 'undefined' && '__TAURI_INTERNALS
 
 const playAudio = (file: string) => {
   const audio = new Audio(file);
+  audio.volume = file.includes('complete') ? 0.34 : 0.28;
   audio.play().catch(() => undefined);
 };
 
@@ -132,10 +133,10 @@ export const PomodoroProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       syncCompletedSessions(event.payload);
     });
     const unlistenCompleted = listen('pomodoro_completed', () => {
-      if (useAppStore.getState().pomodoroSettings.playSound) playAudio('/sounds/complete.mp3');
+      if (useAppStore.getState().pomodoroSettings.playSound) playAudio('/sounds/complete.wav');
     });
     const unlistenBreak = listen('break_completed', () => {
-      if (useAppStore.getState().pomodoroSettings.playSound) playAudio('/sounds/start.mp3');
+      if (useAppStore.getState().pomodoroSettings.playSound) playAudio('/sounds/start.wav');
     });
 
     return () => {

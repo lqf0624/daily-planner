@@ -6,7 +6,7 @@ import { QuarterlyGoal, Task, WeeklyPlan } from '../src/types/index.js';
 
 const resetStore = () => {
   useAppStore.setState({
-    schemaVersion: 7,
+    schemaVersion: 8,
     tasks: [],
     lists: defaultLists,
     goals: [],
@@ -210,4 +210,21 @@ test('syncTaskRelations keeps quarterly goals and weekly goals aligned with task
   assert.deepEqual(state.goals[1].taskIds, []);
   assert.deepEqual(state.weeklyPlans[0].goals[0].taskIds, ['task-1']);
   assert.deepEqual(state.weeklyPlans[0].goals[1].taskIds, []);
+});
+
+test('promoteTaskToSupport moves a later task into today right after the highlight', () => {
+  useAppStore.setState({
+    tasks: [
+      baseTask({ id: 'task-highlight', title: 'highlight', planningState: 'today', isHighlight: true }),
+      baseTask({ id: 'task-support-old', title: 'support-old', planningState: 'today', isHighlight: false }),
+      baseTask({ id: 'task-later', title: 'later-task', planningState: 'later', isHighlight: false }),
+    ],
+  });
+
+  useAppStore.getState().promoteTaskToSupport('task-later');
+  const state = useAppStore.getState();
+
+  assert.equal(state.tasks[1].id, 'task-later');
+  assert.equal(state.tasks[1].planningState, 'today');
+  assert.equal(state.tasks[1].isHighlight, false);
 });

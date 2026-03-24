@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { addWeeks, format, getQuarter, subWeeks } from 'date-fns';
 import { BarChart3, CheckCircle2, ChevronDown, Clock3, FileText, History, Save } from 'lucide-react';
+import { getReviewPanelsCopy } from '../content/reviewPanelsCopy';
 import { useI18n } from '../i18n';
 import { useAppStore } from '../stores/useAppStore';
 import { WeeklyReport as WeeklyReportType } from '../types';
@@ -17,7 +18,8 @@ const toTargetKey = ({ weekNumber, year }: WeekTarget) => `${year}-W${weekNumber
 const toQuarterKey = (year: number, quarter: number) => `${year}-Q${quarter}`;
 
 const WeeklyReport = () => {
-  const { t, formatDate } = useI18n();
+  const { locale, t, formatDate } = useI18n();
+  const copy = getReviewPanelsCopy(locale).weeklyReport;
   const { tasks, weeklyPlans, weeklyReports, addWeeklyReport, updateWeeklyReport, pomodoroHistory } = useAppStore();
   const defaultTarget = useMemo<WeekTarget>(() => {
     const defaultDate = subWeeks(new Date(), 1);
@@ -130,8 +132,8 @@ const WeeklyReport = () => {
           </div>
           <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-500"><Clock3 size={16} className="text-orange-500" />{t('weeklyReport.focusTime')}</div>
-            <div className="mt-3 text-3xl font-black text-slate-900">{pomodoroMinutes} min</div>
-            <div className="mt-1 text-xs text-slate-400">{pomodoroSessions} Pomodoros</div>
+            <div className="mt-3 text-3xl font-black text-slate-900">{copy.focusMinutes(pomodoroMinutes)}</div>
+            <div className="mt-1 text-xs text-slate-400">{copy.focusSessions(pomodoroSessions)}</div>
           </div>
           <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-500"><BarChart3 size={16} className="text-sky-500" />{t('weeklyReport.goalCount')}</div>
@@ -184,7 +186,7 @@ const WeeklyReport = () => {
                   return (
                     <div key={quarterKey} className="rounded-2xl border border-slate-200 bg-slate-50/70">
                       <button type="button" data-testid={`weekly-report-quarter-${yearGroup.year}-${quarterGroup.quarter}`} className="flex w-full items-center justify-between px-4 py-3 text-left" onClick={() => setExpandedQuarters((current) => ({ ...current, [quarterKey]: !expanded }))}>
-                        <div><div className="text-sm font-semibold text-slate-900">Q{quarterGroup.quarter}</div><div className="text-xs text-slate-500">{quarterGroup.targets.length}</div></div>
+                        <div><div className="text-sm font-semibold text-slate-900">{copy.quarterLabel(quarterGroup.quarter)}</div><div className="text-xs text-slate-500">{quarterGroup.targets.length}</div></div>
                         <ChevronDown size={16} className={`text-slate-400 transition ${expanded ? 'rotate-180' : ''}`} />
                       </button>
                       {expanded && (
