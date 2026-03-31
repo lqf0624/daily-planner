@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useAppStore } from '../stores/useAppStore';
 import { PomodoroMode, PomodoroSettings } from '../types';
+import { isTauriRuntime } from '../utils/runtime';
 
 type NativePomodoroState = {
   time_left: number;
@@ -40,7 +41,6 @@ type PomodoroContextValue = {
 };
 
 const PomodoroContext = createContext<PomodoroContextValue | null>(null);
-const isTauriRuntime = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
 const playAudio = (file: string) => {
   const audio = new Audio(file);
@@ -49,13 +49,11 @@ const playAudio = (file: string) => {
 };
 
 export const PomodoroProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const {
-    pomodoroSettings: localSettings,
-    updatePomodoroSettings: updateStoreSettings,
-    logPomodoroSession,
-    currentTaskId,
-    tasks,
-  } = useAppStore();
+  const localSettings = useAppStore((state) => state.pomodoroSettings);
+  const updateStoreSettings = useAppStore((state) => state.updatePomodoroSettings);
+  const logPomodoroSession = useAppStore((state) => state.logPomodoroSession);
+  const currentTaskId = useAppStore((state) => state.currentTaskId);
+  const tasks = useAppStore((state) => state.tasks);
   const [state, setState] = useState<NativePomodoroState | null>(null);
 
   const buildFallbackState = useCallback((settings: PomodoroSettings, currentTask?: string | null): NativePomodoroState => ({
@@ -76,6 +74,18 @@ export const PomodoroProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       stop_after_sessions: settings.stopAfterSessions,
       stop_after_long_break: settings.stopAfterLongBreak,
     },
+  }), []);
+
+  const buildNativeSettings = useCallback((settings: PomodoroSettings) => ({
+    work_duration: settings.workDuration,
+    short_break_duration: settings.shortBreakDuration,
+    long_break_duration: settings.longBreakDuration,
+    long_break_interval: settings.longBreakInterval,
+    auto_start_breaks: settings.autoStartBreaks,
+    auto_start_pomodoros: settings.autoStartPomodoros,
+    max_sessions: settings.maxSessions,
+    stop_after_sessions: settings.stopAfterSessions,
+    stop_after_long_break: settings.stopAfterLongBreak,
   }), []);
 
   const nextModeAfterSkip = useCallback((current: NativePomodoroState): NativePomodoroState => {
@@ -102,6 +112,7 @@ export const PomodoroProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     const currentTask = currentTaskId ? tasks.find((task) => task.id === currentTaskId) : null;
     setState((current) => current ? { ...current, current_task: currentTask?.title || null } : current);
+    if (!isTauriRuntime()) return;
     invoke('update_task_name', { name: currentTask?.title || null }).catch(() => undefined);
   }, [currentTaskId, tasks]);
 
@@ -119,6 +130,11 @@ export const PomodoroProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [logPomodoroSession]);
 
   useEffect(() => {
+    if (!isTauriRuntime()) {
+      setState((current) => current || buildFallbackState(localSettings, useAppStore.getState().currentTaskId ? useAppStore.getState().tasks.find((task) => task.id === useAppStore.getState().currentTaskId)?.title : null));
+      return undefined;
+    }
+
     invoke<NativePomodoroState>('get_pomodoro_state')
       .then((value) => {
         setState(value);
@@ -150,20 +166,26 @@ export const PomodoroProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const merged = { ...useAppStore.getState().pomodoroSettings, ...settings };
     updateStoreSettings(settings);
 
+    if (!isTauriRuntime()) {
+      setState((current) => {
+        const currentTaskName = useAppStore.getState().tasks.find((task) => task.id === useAppStore.getState().currentTaskId)?.title;
+        if (!current) {
+          return buildFallbackState(merged, currentTaskName);
+        }
+
+        return {
+          ...current,
+          current_task: currentTaskName || current.current_task || null,
+          settings: buildNativeSettings(merged),
+        };
+      });
+      return;
+    }
+
     invoke('update_settings', {
-      settings: {
-        work_duration: merged.workDuration,
-        short_break_duration: merged.shortBreakDuration,
-        long_break_duration: merged.longBreakDuration,
-        long_break_interval: merged.longBreakInterval,
-        auto_start_breaks: merged.autoStartBreaks,
-        auto_start_pomodoros: merged.autoStartPomodoros,
-        max_sessions: merged.maxSessions,
-        stop_after_sessions: merged.stopAfterSessions,
-        stop_after_long_break: merged.stopAfterLongBreak,
-      },
+      settings: buildNativeSettings(merged),
     }).catch(() => undefined);
-  }, [updateStoreSettings]);
+  }, [buildFallbackState, buildNativeSettings, updateStoreSettings]);
 
   const value = useMemo<PomodoroContextValue>(() => ({
     pomodoroSettings: state?.settings

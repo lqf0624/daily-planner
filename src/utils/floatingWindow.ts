@@ -10,17 +10,17 @@ const sizeKey = (mode: FloatingMode) => `floating-pomodoro-size-${mode}`;
 
 const defaultSizes: Record<FloatingMode, FloatingWindowSize> = {
   standard: { width: 300, height: 184 },
-  mini: { width: 320, height: 64 },
+  mini: { width: 268, height: 64 },
 };
 
 const minSizes: Record<FloatingMode, FloatingWindowSize> = {
   standard: { width: 280, height: 168 },
-  mini: { width: 240, height: 56 },
+  mini: { width: 220, height: 56 },
 };
 
 const maxSizes: Record<FloatingMode, FloatingWindowSize> = {
   standard: { width: 560, height: 360 },
-  mini: { width: 520, height: 84 },
+  mini: { width: 420, height: 132 },
 };
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));

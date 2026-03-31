@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Inbox, MoveRight, Sparkles } from 'lucide-react';
+import { Inbox, Sparkles } from 'lucide-react';
 import { getWorkflowCopy } from '../content/workflowCopy';
 import { useI18n } from '../i18n';
 import { applyActionPreview } from '../services/aiActions';
@@ -34,6 +34,13 @@ const createInboxTask = (title: string): Task => {
 const durationOptions: Array<NonNullable<Task['estimatedMinutes']>> = [15, 30, 60, 90];
 const typeOptions: Array<NonNullable<Task['taskType']>> = ['deep', 'shallow', 'personal'];
 
+type InboxDraft = {
+  estimatedMinutes?: Task['estimatedMinutes'];
+  taskType?: Task['taskType'];
+  planningState?: Task['planningState'];
+  notes?: string;
+};
+
 const InboxWorkspace = () => {
   const { locale } = useI18n();
   const copy = getWorkflowCopy(locale);
@@ -42,13 +49,67 @@ const InboxWorkspace = () => {
     addTask,
     updateTask,
     setTaskPlanningState,
-    setTaskEstimate,
-    setTaskType,
   } = useAppStore();
   const [draft, setDraft] = useState('');
+  const [pendingEdits, setPendingEdits] = useState<Record<string, InboxDraft>>({});
 
   const inboxTasks = useMemo(() => tasks.filter(isInboxTask), [tasks]);
   const laterTasks = useMemo(() => tasks.filter(isLaterTask).slice(0, 6), [tasks]);
+
+  const readDraft = (task: Task): InboxDraft => ({
+    estimatedMinutes: pendingEdits[task.id]?.estimatedMinutes ?? task.estimatedMinutes,
+    taskType: pendingEdits[task.id]?.taskType ?? task.taskType,
+    planningState: pendingEdits[task.id]?.planningState ?? task.planningState ?? 'inbox',
+    notes: pendingEdits[task.id]?.notes ?? task.notes ?? '',
+  });
+
+  const updateDraft = (taskId: string, updates: InboxDraft) => {
+    setPendingEdits((current) => ({
+      ...current,
+      [taskId]: {
+        ...current[taskId],
+        ...updates,
+      },
+    }));
+  };
+
+  const isDraftDirty = (task: Task) => {
+    const draftState = readDraft(task);
+    return (
+      draftState.estimatedMinutes !== task.estimatedMinutes
+      || draftState.taskType !== task.taskType
+      || draftState.planningState !== (task.planningState ?? 'inbox')
+      || draftState.notes !== (task.notes ?? '')
+    );
+  };
+
+  const getApplyLabel = (task: Task) => {
+    const draftState = readDraft(task);
+    if (draftState.planningState === 'today') return copy.inbox.moveToToday;
+    if (draftState.planningState === 'later') return copy.inbox.moveToLater;
+    return copy.inbox.save;
+  };
+
+  const applyDraft = (task: Task, nextPlanningState?: Task['planningState']) => {
+    const draftState = readDraft(task);
+    const planningState = nextPlanningState ?? draftState.planningState ?? 'inbox';
+
+    updateTask(task.id, {
+      estimatedMinutes: draftState.estimatedMinutes,
+      taskType: draftState.taskType,
+      notes: draftState.notes || undefined,
+    });
+
+    if (planningState !== (task.planningState ?? 'inbox')) {
+      setTaskPlanningState(task.id, planningState);
+    }
+
+    setPendingEdits((current) => {
+      const next = { ...current };
+      delete next[task.id];
+      return next;
+    });
+  };
 
   const handleCapture = () => {
     const title = draft.trim();
@@ -112,8 +173,8 @@ const InboxWorkspace = () => {
                     <div className="mt-3 grid gap-3 md:grid-cols-3">
                       <select
                         data-testid={`inbox-estimate-${task.id}`}
-                        value={task.estimatedMinutes || ''}
-                        onChange={(event) => setTaskEstimate(task.id, event.target.value ? Number(event.target.value) as Task['estimatedMinutes'] : undefined)}
+                        value={readDraft(task).estimatedMinutes || ''}
+                        onChange={(event) => updateDraft(task.id, { estimatedMinutes: event.target.value ? Number(event.target.value) as Task['estimatedMinutes'] : undefined })}
                         className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none"
                       >
                         <option value="">{copy.inbox.estimate}</option>
@@ -123,8 +184,8 @@ const InboxWorkspace = () => {
                       </select>
                       <select
                         data-testid={`inbox-type-${task.id}`}
-                        value={task.taskType || ''}
-                        onChange={(event) => setTaskType(task.id, event.target.value as Task['taskType'] || undefined)}
+                        value={readDraft(task).taskType || ''}
+                        onChange={(event) => updateDraft(task.id, { taskType: event.target.value as Task['taskType'] || undefined })}
                         className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none"
                       >
                         <option value="">{copy.inbox.taskType}</option>
@@ -134,8 +195,8 @@ const InboxWorkspace = () => {
                       </select>
                       <select
                         data-testid={`inbox-state-${task.id}`}
-                        value={task.planningState || 'inbox'}
-                        onChange={(event) => setTaskPlanningState(task.id, event.target.value as Task['planningState'])}
+                        value={readDraft(task).planningState || 'inbox'}
+                        onChange={(event) => updateDraft(task.id, { planningState: event.target.value as Task['planningState'] })}
                         className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none"
                       >
                         <option value="inbox">{copy.inbox.keepInInbox}</option>
@@ -145,16 +206,32 @@ const InboxWorkspace = () => {
                     </div>
                     <textarea
                       data-testid={`inbox-notes-${task.id}`}
-                      value={task.notes || ''}
-                      onChange={(event) => updateTask(task.id, { notes: event.target.value })}
+                      value={readDraft(task).notes}
+                      onChange={(event) => updateDraft(task.id, { notes: event.target.value })}
                       className="mt-3 min-h-[88px] w-full rounded-2xl border border-slate-200 bg-white p-3 text-sm outline-none"
                       placeholder={copy.inbox.notesPlaceholder}
                     />
                   </div>
-                  <Button data-testid={`inbox-move-today-${task.id}`} variant="outline" className="rounded-2xl" onClick={() => setTaskPlanningState(task.id, 'today')}>
-                    <MoveRight size={16} className="mr-2" />
-                    {copy.inbox.todayButton}
-                  </Button>
+                  <div className="flex min-w-[180px] flex-col items-end gap-3">
+                    <div className="flex flex-wrap items-center justify-end gap-2 text-xs">
+                      <span className="rounded-full bg-white px-3 py-1 font-semibold text-slate-500">
+                        {copy.today.planningStateLabels[readDraft(task).planningState || 'inbox']}
+                      </span>
+                      {isDraftDirty(task) && (
+                        <span className="rounded-full bg-amber-50 px-3 py-1 font-semibold text-amber-700">
+                          {copy.inbox.unsavedBadge}
+                        </span>
+                      )}
+                    </div>
+                    <Button
+                      data-testid={`inbox-apply-${task.id}`}
+                      className="w-full rounded-2xl"
+                      onClick={() => applyDraft(task)}
+                      disabled={!isDraftDirty(task)}
+                    >
+                      {getApplyLabel(task)}
+                    </Button>
+                  </div>
                 </div>
               </div>
             ))}

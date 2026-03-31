@@ -69,16 +69,14 @@ const createEmptyTask = (): Task => {
 
 const CalendarView = () => {
   const { t, locale } = useI18n();
-  const {
-    tasks,
-    lists,
-    goals,
-    weeklyPlans,
-    addTask,
-    updateTask,
-    deleteTask,
-    syncTaskRelations,
-  } = useAppStore();
+  const tasks = useAppStore((state) => state.tasks);
+  const lists = useAppStore((state) => state.lists);
+  const goals = useAppStore((state) => state.goals);
+  const weeklyPlans = useAppStore((state) => state.weeklyPlans);
+  const addTask = useAppStore((state) => state.addTask);
+  const updateTask = useAppStore((state) => state.updateTask);
+  const deleteTask = useAppStore((state) => state.deleteTask);
+  const syncTaskRelations = useAppStore((state) => state.syncTaskRelations);
 
   const calendarRef = useRef<FullCalendar>(null);
   const [viewMode, setViewMode] = useState<CalendarViewMode>('timeGridWeek');

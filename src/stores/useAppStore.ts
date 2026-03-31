@@ -9,6 +9,7 @@ import {
   PomodoroHistory,
   PomodoroSettings,
   QuarterlyGoal,
+  ReviewHistoryDate,
   Task,
   WeeklyGoal,
   WeeklyPlan,
@@ -37,6 +38,7 @@ type AppStoreState = {
   aiSettings: AISettings;
   chatHistory: ChatMessage[];
   legacyData: LegacyData;
+  reviewHistoryDates: ReviewHistoryDate[];
   isSettingsOpen: boolean;
   currentTaskId: string | null;
   selectedTaskId: string | null;
@@ -47,6 +49,7 @@ type AppStoreState = {
   setCurrentTaskId: (taskId: string | null) => void;
   setSelectedTaskId: (taskId: string | null) => void;
   setIsAIPanelOpen: (isOpen: boolean) => void;
+  rememberReviewDate: (date: string) => void;
   importData: (data: Partial<AppStoreState>) => void;
   addTask: (task: Task) => void;
   updateTask: (id: string, updates: Partial<Task>) => void;
@@ -88,6 +91,7 @@ const initialState: Omit<
   | 'setCurrentTaskId'
   | 'setSelectedTaskId'
   | 'setIsAIPanelOpen'
+  | 'rememberReviewDate'
   | 'importData'
   | 'addTask'
   | 'updateTask'
@@ -133,6 +137,7 @@ const initialState: Omit<
   aiSettings: defaultAISettings,
   chatHistory: [],
   legacyData: {},
+  reviewHistoryDates: [],
   isSettingsOpen: false,
   currentTaskId: null,
   selectedTaskId: null,
@@ -147,6 +152,8 @@ const legacyStorageKeys = [
   'daily-planner-storage',
   'zustand',
 ];
+
+const todayDate = () => nowIso().slice(0, 10);
 
 const syncGoalWeeklyLinks = (goals: QuarterlyGoal[], weeklyPlans: WeeklyPlan[]) => {
   const weeklyGoalMap = new Map<string, string[]>();
@@ -204,11 +211,23 @@ export const useAppStore = create<AppStoreState>()(
       setCurrentTaskId: (taskId) => set({ currentTaskId: taskId }),
       setSelectedTaskId: (taskId) => set({ selectedTaskId: taskId }),
       setIsAIPanelOpen: (isOpen) => set({ isAIPanelOpen: isOpen }),
+      rememberReviewDate: (date) => set((state) => ({
+        reviewHistoryDates: state.reviewHistoryDates.includes(date)
+          ? state.reviewHistoryDates
+          : [...state.reviewHistoryDates, date].sort((a, b) => b.localeCompare(a)),
+      })),
       importData: (data) => set((state) => ({
         ...state,
         ...migrateStore(data),
       })),
-      addTask: (task) => set((state) => ({ tasks: [...state.tasks, task] })),
+      addTask: (task) => set((state) => ({
+        tasks: [
+          ...state.tasks,
+          task.planningState === 'today' && !task.plannedForDate
+            ? { ...task, plannedForDate: task.scheduledStart?.slice(0, 10) || todayDate() }
+            : task,
+        ],
+      })),
       updateTask: (id, updates) => set((state) => ({
         tasks: state.tasks.map((task) => task.id === id
           ? { ...task, ...updates, updatedAt: nowIso() }
@@ -219,6 +238,7 @@ export const useAppStore = create<AppStoreState>()(
           ? {
               ...task,
               planningState,
+              plannedForDate: planningState === 'today' ? todayDate() : task.plannedForDate,
               isHighlight: planningState !== 'today' ? false : task.isHighlight,
               updatedAt: nowIso(),
             }
@@ -238,6 +258,7 @@ export const useAppStore = create<AppStoreState>()(
         tasks: state.tasks.map((task) => ({
           ...task,
           planningState: task.id === id ? 'today' : task.planningState,
+          plannedForDate: task.id === id ? todayDate() : task.plannedForDate,
           isHighlight: task.id === id,
           updatedAt: task.id === id || task.isHighlight ? nowIso() : task.updatedAt,
         })),
@@ -249,6 +270,7 @@ export const useAppStore = create<AppStoreState>()(
         const updatedTask: Task = {
           ...task,
           planningState: 'today',
+          plannedForDate: todayDate(),
           isHighlight: false,
           updatedAt: nowIso(),
         };
@@ -267,6 +289,7 @@ export const useAppStore = create<AppStoreState>()(
           return {
             ...task,
             planningState: plannedToday ? 'today' : task.planningState,
+            plannedForDate: plannedToday ? todayDate() : task.plannedForDate,
             isHighlight: task.id === highlightTaskId,
             updatedAt: plannedToday || task.id === highlightTaskId || task.isHighlight ? nowIso() : task.updatedAt,
           };
@@ -487,6 +510,7 @@ export const useAppStore = create<AppStoreState>()(
         currentTaskId: state.currentTaskId,
         chatHistory: state.chatHistory,
         legacyData: state.legacyData,
+        reviewHistoryDates: state.reviewHistoryDates,
         isAIPanelOpen: state.isAIPanelOpen,
       }),
     },

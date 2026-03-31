@@ -37,9 +37,19 @@ export const getPlanningState = (task: Task): NonNullable<Task['planningState']>
   return displayDate <= today ? 'today' : 'later';
 };
 
+const todayDate = () => format(new Date(), 'yyyy-MM-dd');
+
+const isActiveTodayCommitment = (task: Task, referenceDate = todayDate()) => {
+  if (getPlanningState(task) !== 'today') return false;
+  if (!task.plannedForDate) return true;
+  return task.plannedForDate === referenceDate;
+};
+
 export const isInboxTask = (task: Task) => task.status === 'todo' && getPlanningState(task) === 'inbox';
 
-export const isTodayTask = (task: Task) => task.status === 'todo' && getPlanningState(task) === 'today';
+export const isTodayTask = (task: Task, referenceDate = todayDate()) => (
+  task.status === 'todo' && isActiveTodayCommitment(task, referenceDate)
+);
 
 export const isLaterTask = (task: Task) => task.status === 'todo' && getPlanningState(task) === 'later';
 

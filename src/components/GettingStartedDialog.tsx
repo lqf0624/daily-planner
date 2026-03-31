@@ -1,10 +1,9 @@
 import { useState } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
 import { ClipboardCheck, Inbox, Sparkles, Target } from 'lucide-react';
 import { getWorkflowCopy } from '../content/workflowCopy';
 import { useI18n } from '../i18n';
-import { Dialog, DialogContent } from './ui/dialog';
 import { Button } from './ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog';
 
 type GuideTab = 'inbox' | 'today' | 'review';
 
@@ -37,20 +36,22 @@ const GettingStartedDialog = ({ open, onClose, onJump }: GettingStartedDialogPro
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
       <DialogContent className="w-[min(94vw,980px)] max-w-[980px] rounded-[32px] border-slate-200 bg-white p-0">
+        <DialogTitle className="sr-only">{copy.guide.title}</DialogTitle>
+        <DialogDescription className="sr-only">{copy.guide.description}</DialogDescription>
+
         <div className="grid overflow-hidden lg:grid-cols-[280px_minmax(0,1fr)]">
           <aside className="border-r border-slate-200 bg-slate-50/90 p-6">
             <div className="rounded-[28px] bg-white p-5 shadow-sm">
               <div className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">{copy.guide.header}</div>
               <h2 className="mt-3 text-2xl font-black tracking-tight text-slate-900">{copy.guide.title}</h2>
-              <p className="mt-3 text-sm leading-6 text-slate-500">
-                {copy.guide.description}
-              </p>
+              <p className="mt-3 text-sm leading-6 text-slate-500">{copy.guide.description}</p>
             </div>
 
             <div className="mt-5 space-y-3">
               {steps.map((item, itemIndex) => {
                 const ItemIcon = stepIcons[item.id];
                 const active = itemIndex === index;
+
                 return (
                   <button
                     key={item.id}
@@ -75,98 +76,86 @@ const GettingStartedDialog = ({ open, onClose, onJump }: GettingStartedDialogPro
           </aside>
 
           <section className="min-w-0 p-6">
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={step.id}
-                initial={{ opacity: 0, x: 18 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -18 }}
-                transition={{ duration: 0.22, ease: 'easeOut' }}
-              >
-                <div className={`rounded-[32px] bg-gradient-to-br ${stepAccents[step.id]} p-6`}>
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <div className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">{step.eyebrow}</div>
-                      <h3 className="mt-3 text-3xl font-black tracking-tight text-slate-900">{step.title}</h3>
-                      <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">{step.description}</p>
-                    </div>
-                    <div className="rounded-[24px] bg-white/80 p-3 shadow-sm">
-                      <StepIcon size={22} className="text-slate-900" />
-                    </div>
+            <div key={step.id} className="animate-in fade-in-0 slide-in-from-right-2 duration-200">
+              <div className={`rounded-[32px] bg-gradient-to-br ${stepAccents[step.id]} p-6`}>
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">{step.eyebrow}</div>
+                    <h3 className="mt-3 text-3xl font-black tracking-tight text-slate-900">{step.title}</h3>
+                    <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">{step.description}</p>
                   </div>
-
-                  <div className="mt-6 grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
-                    <div className="rounded-[28px] bg-white/90 p-5 shadow-sm">
-                      <div className="flex items-center gap-2 text-sm font-black text-slate-900">
-                        <Sparkles size={16} className="text-primary" />
-                        {copy.guide.typicalExample}
-                      </div>
-                      <div className="mt-4 space-y-3">
-                        {step.cards.map((card, itemIndex) => (
-                          <motion.div
-                            key={`${step.id}-${card.label}`}
-                            initial={{ opacity: 0, y: 12 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: itemIndex * 0.07, duration: 0.24 }}
-                            className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
-                          >
-                            <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">{card.label}</div>
-                            <div className="mt-2 text-sm leading-6 text-slate-700">{card.text}</div>
-                          </motion.div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="rounded-[28px] bg-white/90 p-5 shadow-sm">
-                      <div className="text-sm font-black text-slate-900">{copy.guide.produced}</div>
-                      <div className="mt-4 space-y-3">
-                        {step.outcome.map((line, itemIndex) => (
-                          <motion.div
-                            key={`${step.id}-${line}`}
-                            initial={{ opacity: 0, y: 12 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: itemIndex * 0.08, duration: 0.24 }}
-                            className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-700"
-                          >
-                            {line}
-                          </motion.div>
-                        ))}
-                      </div>
-                    </div>
+                  <div className="rounded-[24px] bg-white/80 p-3 shadow-sm">
+                    <StepIcon size={22} className="text-slate-900" />
                   </div>
                 </div>
 
-                <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    {steps.map((item, itemIndex) => (
-                      <div
-                        key={item.id}
-                        className={`h-2 rounded-full transition-all ${itemIndex === index ? 'w-10 bg-slate-900' : 'w-2 bg-slate-300'}`}
-                      />
-                    ))}
+                <div className="mt-6 grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+                  <div className="rounded-[28px] bg-white/90 p-5 shadow-sm">
+                    <div className="flex items-center gap-2 text-sm font-black text-slate-900">
+                      <Sparkles size={16} className="text-primary" />
+                      {copy.guide.typicalExample}
+                    </div>
+                    <div className="mt-4 space-y-3">
+                      {step.cards.map((card, itemIndex) => (
+                        <div
+                          key={`${step.id}-${card.label}`}
+                          className="rounded-2xl border border-slate-200 bg-slate-50 p-4 animate-in fade-in-0 slide-in-from-bottom-1 duration-200"
+                          style={{ animationDelay: `${itemIndex * 60}ms` }}
+                        >
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">{card.label}</div>
+                          <div className="mt-2 text-sm leading-6 text-slate-700">{card.text}</div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button variant="outline" className="rounded-2xl" onClick={() => onJump(step.id)}>
-                      {step.id === 'inbox' ? copy.guide.openInbox : step.id === 'today' ? copy.guide.openToday : copy.guide.openReview}
+
+                  <div className="rounded-[28px] bg-white/90 p-5 shadow-sm">
+                    <div className="text-sm font-black text-slate-900">{copy.guide.produced}</div>
+                    <div className="mt-4 space-y-3">
+                      {step.outcome.map((line, itemIndex) => (
+                        <div
+                          key={`${step.id}-${line}`}
+                          className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-700 animate-in fade-in-0 slide-in-from-bottom-1 duration-200"
+                          style={{ animationDelay: `${itemIndex * 70}ms` }}
+                        >
+                          {line}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  {steps.map((item, itemIndex) => (
+                    <div
+                      key={item.id}
+                      className={`h-2 rounded-full transition-all ${itemIndex === index ? 'w-10 bg-slate-900' : 'w-2 bg-slate-300'}`}
+                    />
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" className="rounded-2xl" onClick={() => onJump(step.id)}>
+                    {step.id === 'inbox' ? copy.guide.openInbox : step.id === 'today' ? copy.guide.openToday : copy.guide.openReview}
+                  </Button>
+                  {index > 0 && (
+                    <Button variant="outline" className="rounded-2xl" onClick={() => setIndex((current) => current - 1)}>
+                      {copy.guide.back}
                     </Button>
-                    {index > 0 && (
-                      <Button variant="outline" className="rounded-2xl" onClick={() => setIndex((current) => current - 1)}>
-                        {copy.guide.back}
-                      </Button>
-                    )}
-                    {index < steps.length - 1 ? (
-                      <Button data-testid="guide-next" className="rounded-2xl" onClick={() => setIndex((current) => current + 1)}>
-                        {copy.guide.next}
-                      </Button>
-                    ) : (
-                      <Button data-testid="guide-finish" className="rounded-2xl" onClick={onClose}>
-                        {copy.guide.gotIt}
-                      </Button>
-                    )}
-                  </div>
+                  )}
+                  {index < steps.length - 1 ? (
+                    <Button data-testid="guide-next" className="rounded-2xl" onClick={() => setIndex((current) => current + 1)}>
+                      {copy.guide.next}
+                    </Button>
+                  ) : (
+                    <Button data-testid="guide-finish" className="rounded-2xl" onClick={onClose}>
+                      {copy.guide.gotIt}
+                    </Button>
+                  )}
                 </div>
-              </motion.div>
-            </AnimatePresence>
+              </div>
+            </div>
           </section>
         </div>
       </DialogContent>

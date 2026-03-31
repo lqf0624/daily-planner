@@ -1,6 +1,7 @@
-import { type MouseEvent as ReactMouseEvent, useEffect, useMemo, useState } from 'react';
+import { type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
+import { LogicalSize } from '@tauri-apps/api/dpi';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { EyeOff, FastForward, PanelTop, Pause, Play, RotateCcw } from 'lucide-react';
 import { getFloatingCopy } from '../content/floatingCopy';
@@ -148,7 +149,8 @@ const FloatingPomodoro = () => {
   const { locale, t } = useI18n();
   const copy = getFloatingCopy(locale);
   const { timeLeft, isActive, mode, toggleTimer, resetTimer, skipMode, currentTaskName } = usePomodoro();
-  const { tasks, currentTaskId } = useAppStore();
+  const tasks = useAppStore((state) => state.tasks);
+  const currentTaskId = useAppStore((state) => state.currentTaskId);
   const currentTask = tasks.find((task) => task.id === currentTaskId);
   const initialPreferences = readPreferences();
   const initialMode = (() => {
@@ -163,6 +165,7 @@ const FloatingPomodoro = () => {
   const [menu, setMenu] = useState<MenuState>(null);
   const [frame, setFrame] = useState({ width: window.innerWidth, height: window.innerHeight });
   const [boundTaskName, setBoundTaskName] = useState<string | null>(readBoundTaskNameFromStorage());
+  const miniCollapsedSizeRef = useRef(readFloatingSize('mini'));
 
   const minutes = Math.floor(timeLeft / 60).toString().padStart(2, '0');
   const seconds = (timeLeft % 60).toString().padStart(2, '0');
@@ -235,7 +238,9 @@ const FloatingPomodoro = () => {
         if (active) {
           const next = normalizeFloatingSize(floatingMode, { width: size.width, height: size.height });
           setFrame(next);
-          writeFloatingSize(floatingMode, next);
+          if (!(floatingMode === 'mini' && menu)) {
+            writeFloatingSize(floatingMode, next);
+          }
         }
       } catch {
         // Ignore resize sync failures.
@@ -247,7 +252,9 @@ const FloatingPomodoro = () => {
       const onResize = () => {
         const next = normalizeFloatingSize(floatingMode, { width: window.innerWidth, height: window.innerHeight });
         setFrame(next);
-        writeFloatingSize(floatingMode, next);
+        if (!(floatingMode === 'mini' && menu)) {
+          writeFloatingSize(floatingMode, next);
+        }
       };
       window.addEventListener('resize', onResize);
       return () => window.removeEventListener('resize', onResize);
@@ -256,14 +263,63 @@ const FloatingPomodoro = () => {
     const unlistenPromise = appWindow.onResized(({ payload }) => {
       const next = normalizeFloatingSize(floatingMode, { width: payload.width, height: payload.height });
       setFrame(next);
-      writeFloatingSize(floatingMode, next);
+      if (!(floatingMode === 'mini' && menu)) {
+        writeFloatingSize(floatingMode, next);
+      }
     });
 
     return () => {
       active = false;
       unlistenPromise.then((unlisten) => unlisten()).catch(() => undefined);
     };
-  }, [appWindow, floatingMode]);
+  }, [appWindow, floatingMode, menu]);
+
+  useEffect(() => {
+    if (!appWindow) return;
+
+    const syncConstraints = async () => {
+      if (floatingMode === 'mini') {
+        const miniHeight = menu ? 122 : 64;
+        await appWindow.setSizeConstraints({
+          minWidth: 220,
+          maxWidth: 420,
+          minHeight: miniHeight,
+          maxHeight: miniHeight,
+        });
+        return;
+      }
+
+      await appWindow.setSizeConstraints({
+        minWidth: 280,
+        maxWidth: 560,
+        minHeight: 168,
+        maxHeight: 360,
+      });
+    };
+
+    syncConstraints().catch(() => undefined);
+  }, [appWindow, floatingMode, menu]);
+
+  useEffect(() => {
+    if (!appWindow || floatingMode !== 'mini') return;
+
+    const restoreMiniSize = async () => {
+      const restored = normalizeFloatingSize('mini', miniCollapsedSizeRef.current);
+      await appWindow.setSize(new LogicalSize(restored.width, restored.height));
+    };
+
+    const expandForMenu = async () => {
+      miniCollapsedSizeRef.current = readFloatingSize('mini');
+      await appWindow.setSize(new LogicalSize(miniCollapsedSizeRef.current.width, 122));
+    };
+
+    if (menu) {
+      expandForMenu().catch(() => undefined);
+      return;
+    }
+
+    restoreMiniSize().catch(() => undefined);
+  }, [appWindow, floatingMode, menu]);
 
   const compact = floatingMode === 'mini' || frame.width < 276 || frame.height < 86;
   const timerClass = compact ? 'text-[28px]' : frame.width < 320 || frame.height < 176 ? 'text-[42px]' : 'text-[48px]';
@@ -301,8 +357,13 @@ const FloatingPomodoro = () => {
         onClick={() => setMenu(null)}
         onContextMenu={openMenu}
       >
-        <div data-testid="floating-frame" className="flex h-full w-full items-center gap-2 border px-3 py-2 shadow-[0_10px_24px_rgba(15,23,42,0.12)]" style={{ background: palette.mini, borderColor: palette.border }}>
-          <div data-testid="floating-drag-handle" className="min-w-0 flex-1 cursor-grab active:cursor-grabbing" onMouseDown={() => appWindow?.startDragging().catch(() => undefined)}>
+        <div data-testid="floating-frame" className="relative flex h-full w-full items-center gap-2 border px-3 py-2 pr-5 shadow-[0_10px_24px_rgba(15,23,42,0.12)]" style={{ background: palette.mini, borderColor: palette.border }}>
+          <div
+            data-testid="floating-drag-handle"
+            className="min-w-0 flex-1 cursor-grab active:cursor-grabbing"
+            onMouseDown={() => appWindow?.startDragging().catch(() => undefined)}
+            title={displayTaskName}
+          >
             <div className={`text-[9px] font-semibold uppercase tracking-[0.24em] ${styles.subtle}`}>{compactModeLabel}</div>
             <div className={`truncate text-[11px] font-semibold ${styles.text}`}>{displayTaskName}</div>
           </div>
@@ -332,14 +393,27 @@ const FloatingPomodoro = () => {
           <button type="button" data-testid="floating-standard-switch" className={`flex h-9 w-9 items-center justify-center rounded-full border ${styles.button}`} onClick={() => switchMode('standard')}>
             <PanelTop size={14} />
           </button>
+
+          <button
+            type="button"
+            aria-label="Resize mini timer"
+            data-testid="floating-mini-resize"
+            className="absolute inset-y-1 right-0 flex w-3 cursor-ew-resize items-center justify-center rounded-r-[18px] bg-white/18 transition hover:bg-white/28"
+            onMouseDown={(event) => {
+              event.stopPropagation();
+              appWindow?.startResizeDragging('East').catch(() => undefined);
+            }}
+          >
+            <span className="h-5 w-[3px] rounded-full bg-slate-500/35" />
+          </button>
         </div>
 
         {menu && (
-          <div className={`absolute z-50 flex items-center gap-1 rounded-full border px-1.5 py-1 shadow-2xl ${palette.menu}`} style={menuPosition(menu, 178, 40)} onClick={(event) => event.stopPropagation()}>
-            <button type="button" data-testid="floating-menu-standard" className="flex items-center rounded-full px-3 py-1.5 text-[11px] font-medium text-slate-700 transition hover:bg-slate-100" onClick={() => { setMenu(null); switchMode('standard'); }}>
+          <div className={`absolute z-50 min-w-[132px] rounded-2xl border p-1.5 shadow-2xl ${palette.menu}`} style={menuPosition(menu, 140, 74)} onClick={(event) => event.stopPropagation()}>
+            <button type="button" data-testid="floating-menu-standard" className="flex w-full items-center rounded-xl px-3 py-2 text-left text-[11px] font-medium text-slate-700 transition hover:bg-slate-100" onClick={() => { setMenu(null); switchMode('standard'); }}>
               {copy.menu.switchStandard}
             </button>
-            <button type="button" data-testid="floating-menu-hide" className="flex items-center rounded-full px-3 py-1.5 text-[11px] font-medium text-slate-700 transition hover:bg-slate-100" onClick={() => { setMenu(null); closeFloating(); }}>
+            <button type="button" data-testid="floating-menu-hide" className="flex w-full items-center rounded-xl px-3 py-2 text-left text-[11px] font-medium text-slate-700 transition hover:bg-slate-100" onClick={() => { setMenu(null); closeFloating(); }}>
               {copy.menu.hide}
             </button>
           </div>

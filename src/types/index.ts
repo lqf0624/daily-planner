@@ -27,6 +27,7 @@ export interface Task {
   notes?: string;
   status: TaskStatus;
   planningState?: TaskPlanningState;
+  plannedForDate?: string;
   estimatedMinutes?: 15 | 30 | 60 | 90;
   taskType?: TaskType;
   isHighlight?: boolean;
@@ -181,3 +182,5 @@ export interface LegacyData {
   weeklyPlans?: Array<Record<string, unknown>>;
   habits?: Array<Record<string, unknown>>;
 }
+
+export type ReviewHistoryDate = string;

@@ -219,7 +219,7 @@ fn format_tray_text(mode: &str, time_left: u32, current_task: Option<&str>, tick
 
 fn floating_window_spec(mode: &str) -> (&'static str, f64, f64, bool) {
   if mode == "mini" {
-    ("/?view=floating&mode=mini", 320.0, 64.0, false)
+    ("/?view=floating&mode=mini", 268.0, 64.0, true)
   } else {
     ("/?view=floating", 300.0, 184.0, true)
   }
@@ -228,7 +228,7 @@ fn floating_window_spec(mode: &str) -> (&'static str, f64, f64, bool) {
 fn preferred_floating_size(mode: &str, width: Option<f64>, height: Option<f64>) -> (f64, f64) {
   let (_, default_width, default_height, _) = floating_window_spec(mode);
   let (min_width, min_height, max_width, max_height) = if mode == "mini" {
-    (240.0, 56.0, 520.0, 84.0)
+    (220.0, 56.0, 420.0, 132.0)
   } else {
     (280.0, 168.0, 560.0, 360.0)
   };

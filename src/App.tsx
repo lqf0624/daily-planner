@@ -9,6 +9,7 @@ import { useI18n } from './i18n';
 import { useAppStore } from './stores/useAppStore';
 import { getOngoingTask } from './utils/taskActivity';
 import { cn } from './utils/cn';
+import { isTauriRuntime } from './utils/runtime';
 import FloatingPomodoro from './views/FloatingPomodoro';
 import FloatingPomodoroSettings from './views/FloatingPomodoroSettings';
 import NotificationView from './views/NotificationView';
@@ -23,20 +24,18 @@ const GUIDE_MARKER = 'daily-planner-guide-v2-seen';
 
 const App = () => {
   const { locale, t } = useI18n();
-  const {
-    tasks,
-    weeklyPlans,
-    goals,
-    weeklyReports,
-    habits,
-    chatHistory,
-    currentTaskId,
-    _hasHydrated,
-    setCurrentTaskId,
-    isSettingsOpen,
-    setIsSettingsOpen,
-    importData,
-  } = useAppStore();
+  const tasks = useAppStore((state) => state.tasks);
+  const weeklyPlans = useAppStore((state) => state.weeklyPlans);
+  const goals = useAppStore((state) => state.goals);
+  const weeklyReports = useAppStore((state) => state.weeklyReports);
+  const habits = useAppStore((state) => state.habits);
+  const chatHistory = useAppStore((state) => state.chatHistory);
+  const currentTaskId = useAppStore((state) => state.currentTaskId);
+  const _hasHydrated = useAppStore((state) => state._hasHydrated);
+  const setCurrentTaskId = useAppStore((state) => state.setCurrentTaskId);
+  const isSettingsOpen = useAppStore((state) => state.isSettingsOpen);
+  const setIsSettingsOpen = useAppStore((state) => state.setIsSettingsOpen);
+  const importData = useAppStore((state) => state.importData);
   const [activeTab, setActiveTab] = useState<'inbox' | 'today' | 'review'>('today');
   const [isGuideOpen, setIsGuideOpen] = useState(false);
   const notifiedRef = useRef<Set<string>>(new Set());
@@ -58,6 +57,7 @@ const App = () => {
     if (view !== 'main') return;
 
     const notify = (title: string, body: string) => {
+      if (!isTauriRuntime()) return;
       invoke('show_notification', { title, body }).catch(() => undefined);
     };
 
@@ -106,6 +106,11 @@ const App = () => {
       return;
     }
 
+    if (!isTauriRuntime()) {
+      localStorage.setItem(LEGACY_IMPORT_MARKER, JSON.stringify({ skippedAt: new Date().toISOString(), reason: 'non-tauri-runtime' }));
+      return;
+    }
+
     let cancelled = false;
     invoke<string | null>('load_legacy_daily_planner_ai_store')
       .then((payload) => {
@@ -141,7 +146,7 @@ const App = () => {
     syncCurrentFocus();
     const timer = window.setInterval(syncCurrentFocus, 60_000);
     return () => window.clearInterval(timer);
-  }, [_hasHydrated, setCurrentTaskId, tasks, view]);
+  }, [_hasHydrated, setCurrentTaskId, view]);
 
   useEffect(() => {
     if (view !== 'main' || !_hasHydrated || typeof localStorage === 'undefined') return;

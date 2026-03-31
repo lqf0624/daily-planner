@@ -25,13 +25,15 @@ export const buildTaskFromPreview = (payload: Record<string, unknown>, defaults?
   const startTime = typeof payload.startTime === 'string' ? `${date}T${payload.startTime}:00` : defaults?.scheduledStart;
   const endTime = typeof payload.endTime === 'string' ? `${date}T${payload.endTime}:00` : defaults?.scheduledEnd;
   const now = nowIso();
+  const planningState = normalizeTaskPlanningState(payload.planningState ?? defaults?.planningState);
 
   return {
     id: crypto.randomUUID(),
     title: typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim() : defaults?.title || 'Untitled task',
     notes: typeof payload.notes === 'string' ? payload.notes : defaults?.notes,
     status: 'todo',
-    planningState: normalizeTaskPlanningState(payload.planningState ?? defaults?.planningState),
+    planningState,
+    plannedForDate: planningState === 'today' ? date : defaults?.plannedForDate,
     estimatedMinutes: normalizeEstimate(payload.estimatedMinutes ?? defaults?.estimatedMinutes),
     taskType: normalizeTaskType(payload.taskType ?? defaults?.taskType),
     isHighlight: payload.isHighlight === true || defaults?.isHighlight,
@@ -81,6 +83,9 @@ export const applyActionPreview = (preview: AIActionPreview) => {
       estimatedMinutes: normalizeEstimate(preview.payload.estimatedMinutes),
       taskType: normalizeTaskType(preview.payload.taskType),
       planningState: normalizeTaskPlanningState(preview.payload.planningState),
+      plannedForDate: preview.payload.planningState === 'today'
+        ? (typeof preview.payload.date === 'string' ? preview.payload.date : format(new Date(), 'yyyy-MM-dd'))
+        : undefined,
       scheduledStart: typeof preview.payload.date === 'string' && typeof preview.payload.startTime === 'string' ? `${preview.payload.date}T${preview.payload.startTime}:00` : undefined,
       scheduledEnd: typeof preview.payload.date === 'string' && typeof preview.payload.endTime === 'string' ? `${preview.payload.date}T${preview.payload.endTime}:00` : undefined,
     });
@@ -110,6 +115,7 @@ export const applyActionPreview = (preview: AIActionPreview) => {
     const end = typeof preview.payload.endTime === 'string' ? `${date}T${preview.payload.endTime}:00` : undefined;
     store.updateTask(taskId, {
       planningState: 'today',
+      plannedForDate: date,
       scheduledStart: start,
       scheduledEnd: end,
       dueAt: end || start,

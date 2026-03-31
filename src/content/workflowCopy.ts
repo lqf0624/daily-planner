@@ -57,6 +57,7 @@ type WorkflowCopy = {
     keepInInbox: string;
     moveToToday: string;
     moveToLater: string;
+    unsavedBadge: string;
     notesPlaceholder: string;
     todayButton: string;
     aiTitle: string;
@@ -75,6 +76,7 @@ type WorkflowCopy = {
       support: string;
       schedule: string;
       focus: string;
+      delete: string;
     };
     calendarHeaderEyebrow: string;
     title: string;
@@ -100,6 +102,9 @@ type WorkflowCopy = {
     supportTasksTitle: string;
     supportTasksDescription: string;
     supportTasksEmpty: string;
+    overflowTasksTitle: string;
+    overflowTasksDescription: string;
+    overflowTasksEmpty: string;
     parkingLotTitle: string;
     parkingLotDescription: string;
     parkingLotEmpty: string;
@@ -149,6 +154,11 @@ type WorkflowCopy = {
     activeGoals: string;
     noActiveGoals: string;
     reviewDate: string;
+    reviewDateDescription: string;
+    pendingReviewDates: string;
+    pendingReviewDatesEmpty: string;
+    selectedDateLabel: string;
+    pendingCount: (count: number) => string;
     taskTypeLabels: Record<'deep' | 'shallow' | 'personal', string>;
     progress: (progress: number) => string;
   };
@@ -235,6 +245,7 @@ const en: WorkflowCopy = {
     keepInInbox: 'Keep in inbox',
     moveToToday: 'Move to today',
     moveToLater: 'Move to later',
+    unsavedBadge: 'Unsaved',
     notesPlaceholder: 'Definition of done, context, or supporting notes',
     todayButton: 'Today',
     aiTitle: 'AI Inbox Triage',
@@ -247,7 +258,7 @@ const en: WorkflowCopy = {
     taskTypeOptions: { deep: 'deep', shallow: 'shallow', personal: 'personal' },
   },
   today: {
-    taskChip: { highlight: 'Highlight', later: 'Later', support: 'Add To Support', schedule: 'Schedule', focus: 'Focus' },
+    taskChip: { highlight: 'Highlight', later: 'Later', support: 'Add To Support', schedule: 'Schedule', focus: 'Focus', delete: 'Delete' },
     calendarHeaderEyebrow: 'Deep Work',
     title: 'Today',
     calendarHeaderDescription: 'Switch between the planning board and the calendar without leaving today.',
@@ -272,9 +283,12 @@ const en: WorkflowCopy = {
     supportTasksTitle: 'Support Tasks',
     supportTasksDescription: 'Keep this short. If there are more than two, most of them probably belong later.',
     supportTasksEmpty: 'No support tasks chosen yet.',
-    parkingLotTitle: 'Parking Lot',
-    parkingLotDescription: 'Useful tasks that are not part of the 1+2 commitment should wait here.',
-    parkingLotEmpty: 'No overflow tasks right now.',
+    overflowTasksTitle: 'Overflow From Today',
+    overflowTasksDescription: 'These tasks are still marked for today, but they are outside the 1+2 commitment and should usually be moved or reduced.',
+    overflowTasksEmpty: 'No extra today tasks right now.',
+    parkingLotTitle: 'Later Queue',
+    parkingLotDescription: 'These tasks are not part of today. Keep them here until you intentionally pull them back in.',
+    parkingLotEmpty: 'Nothing is parked for later right now.',
     focusBlock: 'Focus Block',
     currentTask: 'Current task',
     noFocusTaskSelected: 'No focus task selected',
@@ -321,6 +335,11 @@ const en: WorkflowCopy = {
     activeGoals: 'Active Goals',
     noActiveGoals: 'No active quarterly goals.',
     reviewDate: 'Review Date',
+    reviewDateDescription: 'Daily shutdown now follows the selected day. Missed days stay here so you can come back and close them later.',
+    pendingReviewDates: 'Reviewable Days',
+    pendingReviewDatesEmpty: 'No daily review dates yet.',
+    selectedDateLabel: 'Selected day',
+    pendingCount: (count) => `${count} open`,
     taskTypeLabels: { deep: 'deep', shallow: 'shallow', personal: 'personal' },
     progress: (progress) => `${progress}% progress`,
   },
@@ -411,6 +430,7 @@ const zhCN: WorkflowCopy = {
     keepInInbox: '继续留在收件箱',
     moveToToday: '移到今日',
     moveToLater: '移到稍后',
+    unsavedBadge: '未保存',
     notesPlaceholder: '完成标准、上下文或补充说明',
     todayButton: '放到今天',
     aiTitle: 'AI 收件箱分拣',
@@ -423,7 +443,7 @@ const zhCN: WorkflowCopy = {
     taskTypeOptions: { deep: '深度', shallow: '浅层', personal: '个人' },
   },
   today: {
-    taskChip: { highlight: '设为重点任务', later: '移到稍后', support: '加入支撑任务', schedule: '安排时间', focus: '开始专注' },
+    taskChip: { highlight: '设为重点任务', later: '移到稍后', support: '加入支撑任务', schedule: '安排时间', focus: '开始专注', delete: '删除' },
     calendarHeaderEyebrow: '深度工作',
     title: '今日',
     calendarHeaderDescription: '不用离开今日，也能在规划面板和日历视图之间切换。',
@@ -448,9 +468,12 @@ const zhCN: WorkflowCopy = {
     supportTasksTitle: '支撑任务',
     supportTasksDescription: '这里要尽量短。如果超过两个，说明大部分任务其实应该移到稍后。',
     supportTasksEmpty: '还没有选定支撑任务。',
+    overflowTasksTitle: '今日溢出',
+    overflowTasksDescription: '这些任务仍然挂在今天，但已经不属于 1+2 承诺，通常应该被下调、顺延或删减。',
+    overflowTasksEmpty: '目前没有超出今日承诺的任务。',
     parkingLotTitle: '稍后处理',
-    parkingLotDescription: '有价值但不属于今天 1+2 承诺的任务，先放在这里等待。',
-    parkingLotEmpty: '目前没有溢出的任务。',
+    parkingLotDescription: '这里的任务不算今天的任务，只是暂时停放，等你明确再拉回今天。',
+    parkingLotEmpty: '目前没有停放到稍后的任务。',
     focusBlock: '专注块',
     currentTask: '当前任务',
     noFocusTaskSelected: '还没有选择专注任务',
@@ -497,6 +520,11 @@ const zhCN: WorkflowCopy = {
     activeGoals: '进行中的目标',
     noActiveGoals: '当前没有进行中的季度目标。',
     reviewDate: '复盘日期',
+    reviewDateDescription: '每日收尾现在只跟随所选日期。漏掉的日子会继续留在这里，之后也能回来补复盘。',
+    pendingReviewDates: '待复盘日期',
+    pendingReviewDatesEmpty: '暂时还没有可复盘的日期。',
+    selectedDateLabel: '当前查看',
+    pendingCount: (count) => `待收尾 ${count} 项`,
     taskTypeLabels: { deep: '深度', shallow: '浅层', personal: '个人' },
     progress: (progress) => `${progress}% 进度`,
   },
@@ -550,6 +578,7 @@ const de: WorkflowCopy = {
     keepInInbox: 'Im Inbox lassen',
     moveToToday: 'Nach Heute verschieben',
     moveToLater: 'Nach Später verschieben',
+    unsavedBadge: 'Ungespeichert',
     notesPlaceholder: 'Done-Kriterien, Kontext oder Notizen',
     todayButton: 'Heute',
     aiTitle: 'KI Inbox-Triage',
@@ -562,7 +591,7 @@ const de: WorkflowCopy = {
     taskTypeOptions: { deep: 'tief', shallow: 'leicht', personal: 'persönlich' },
   },
   today: {
-    taskChip: { highlight: 'Highlight', later: 'Später', support: 'Zu Support', schedule: 'Planen', focus: 'Fokus' },
+    taskChip: { highlight: 'Highlight', later: 'Später', support: 'Zu Support', schedule: 'Planen', focus: 'Fokus', delete: 'Löschen' },
     calendarHeaderEyebrow: 'Deep Work',
     title: 'Heute',
     calendarHeaderDescription: 'Zwischen Planungsboard und Kalender wechseln, ohne Heute zu verlassen.',
@@ -587,9 +616,12 @@ const de: WorkflowCopy = {
     supportTasksTitle: 'Support Tasks',
     supportTasksDescription: 'Halte diese Liste kurz. Mehr als zwei gehören meist eher in später.',
     supportTasksEmpty: 'Noch keine Unterstützungsaufgaben gewählt.',
-    parkingLotTitle: 'Parking Lot',
-    parkingLotDescription: 'Nützliche Aufgaben außerhalb der 1+2-Zusage warten hier.',
-    parkingLotEmpty: 'Gerade keine Überlauf-Aufgaben.',
+    overflowTasksTitle: 'Überhang von heute',
+    overflowTasksDescription: 'Diese Aufgaben sind noch für heute markiert, gehören aber nicht mehr zur 1+2-Zusage und sollten meist reduziert oder verschoben werden.',
+    overflowTasksEmpty: 'Aktuell gibt es keinen heutigen Überhang.',
+    parkingLotTitle: 'Später-Liste',
+    parkingLotDescription: 'Diese Aufgaben zählen nicht zu heute. Sie bleiben hier, bis du sie bewusst zurückholst.',
+    parkingLotEmpty: 'Aktuell ist nichts für später geparkt.',
     focusBlock: 'Fokusblock',
     currentTask: 'Aktuelle Aufgabe',
     noFocusTaskSelected: 'Keine Fokus-Aufgabe gewählt',
@@ -636,6 +668,11 @@ const de: WorkflowCopy = {
     activeGoals: 'Aktive Ziele',
     noActiveGoals: 'Keine aktiven Quartalsziele.',
     reviewDate: 'Rückblick-Datum',
+    reviewDateDescription: 'Der Tagesabschluss folgt jetzt dem gewählten Tag. Vergessene Tage bleiben hier erhalten, damit du sie später nachholen kannst.',
+    pendingReviewDates: 'Prüfbare Tage',
+    pendingReviewDatesEmpty: 'Noch keine Tage für den Tagesabschluss vorhanden.',
+    selectedDateLabel: 'Ausgewählter Tag',
+    pendingCount: (count) => `${count} offen`,
     taskTypeLabels: { deep: 'tief', shallow: 'leicht', personal: 'persönlich' },
     progress: (progress) => `${progress}% Fortschritt`,
   },

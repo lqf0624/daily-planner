@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getOngoingTask, getTaskDateLabel, isTaskScheduledOnDate } from '../src/utils/taskActivity.js';
+import { getOngoingTask, getTaskDateLabel, isTaskScheduledOnDate, isTodayTask } from '../src/utils/taskActivity.js';
 import { Task } from '../src/types/index.js';
 
 const baseTask = (overrides: Partial<Task>): Task => ({
@@ -51,4 +51,23 @@ test('getTaskDateLabel renders same-day timed ranges clearly', () => {
   const label = getTaskDateLabel(baseTask({ scheduledStart: '2026-03-16T14:00:00', scheduledEnd: '2026-03-16T15:30:00' }));
   assert.match(label, /14:00/);
   assert.match(label, /15:30/);
+});
+
+test('isTodayTask excludes carry-over tasks from previous review dates', () => {
+  const task = baseTask({
+    planningState: 'today',
+    plannedForDate: '2026-03-15',
+  });
+
+  assert.equal(isTodayTask(task, '2026-03-16'), false);
+  assert.equal(isTodayTask(task, '2026-03-15'), true);
+});
+
+test('isTodayTask keeps legacy today tasks without plannedForDate visible', () => {
+  const task = baseTask({
+    planningState: 'today',
+    plannedForDate: undefined,
+  });
+
+  assert.equal(isTodayTask(task, '2026-03-16'), true);
 });

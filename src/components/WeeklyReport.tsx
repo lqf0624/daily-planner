@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { addWeeks, format, getQuarter, subWeeks } from 'date-fns';
+import { addWeeks, getQuarter, subWeeks } from 'date-fns';
 import { BarChart3, CheckCircle2, ChevronDown, Clock3, FileText, History, Save } from 'lucide-react';
 import { getReviewPanelsCopy } from '../content/reviewPanelsCopy';
 import { useI18n } from '../i18n';
@@ -16,6 +16,7 @@ type GroupedTargets = { year: number; quarters: Array<{ quarter: number; targets
 const emptyDraft: WeeklyReportDraft = { summary: '', wins: '', blockers: '', adjustments: '' };
 const toTargetKey = ({ weekNumber, year }: WeekTarget) => `${year}-W${weekNumber}`;
 const toQuarterKey = (year: number, quarter: number) => `${year}-Q${quarter}`;
+const hasPlanningDate = (scheduledStart?: string, dueAt?: string) => Boolean(scheduledStart || dueAt);
 
 const WeeklyReport = () => {
   const { locale, t, formatDate } = useI18n();
@@ -74,14 +75,30 @@ const WeeklyReport = () => {
     setDraft(report ? { summary: report.summary, wins: report.wins, blockers: report.blockers, adjustments: report.adjustments } : emptyDraft);
   }, [report]);
 
-  const weekTasks = useMemo(() => tasks.filter((task) => {
-    const date = getTaskDisplayDate(task);
-    return date >= format(start, 'yyyy-MM-dd') && date <= format(end, 'yyyy-MM-dd');
-  }), [end, start, tasks]);
-
-  const completionRate = weekTasks.length ? Math.round((weekTasks.filter((task) => task.status === 'done').length / weekTasks.length) * 100) : 0;
   const dateStart = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
   const dateEnd = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`;
+
+  const weekTasks = useMemo(() => tasks.filter((task) => {
+    if (task.status === 'done') {
+      const completedDate = task.completedAt?.slice(0, 10);
+      return Boolean(completedDate && completedDate >= dateStart && completedDate <= dateEnd);
+    }
+
+    const date = getTaskDisplayDate(task);
+    return date >= dateStart && date <= dateEnd;
+  }), [dateEnd, dateStart, tasks]);
+
+  const completedTasks = useMemo(() => (
+    weekTasks
+      .filter((task) => task.status === 'done')
+      .sort((a, b) => {
+        const bTime = b.completedAt ? new Date(b.completedAt).getTime() : 0;
+        const aTime = a.completedAt ? new Date(a.completedAt).getTime() : 0;
+        return bTime - aTime;
+      })
+  ), [weekTasks]);
+
+  const completionRate = weekTasks.length ? Math.round((weekTasks.filter((task) => task.status === 'done').length / weekTasks.length) * 100) : 0;
   const pomodoroDates = Object.entries(pomodoroHistory).filter(([date]) => date >= dateStart && date <= dateEnd);
   const pomodoroMinutes = pomodoroDates.reduce((sum, [, item]) => sum + item.minutes, 0);
   const pomodoroSessions = pomodoroDates.reduce((sum, [, item]) => sum + item.sessions, 0);
@@ -129,6 +146,7 @@ const WeeklyReport = () => {
           <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-500"><CheckCircle2 size={16} className="text-primary" />{t('weeklyReport.completion')}</div>
             <div className="mt-3 text-3xl font-black text-slate-900">{completionRate}%</div>
+            <div className="mt-1 text-xs text-slate-400">{t('weeklyReport.doneTasks', { count: completedTasks.length })}</div>
           </div>
           <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-500"><Clock3 size={16} className="text-orange-500" />{t('weeklyReport.focusTime')}</div>
@@ -139,6 +157,56 @@ const WeeklyReport = () => {
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-500"><BarChart3 size={16} className="text-sky-500" />{t('weeklyReport.goalCount')}</div>
             <div className="mt-3 text-3xl font-black text-slate-900">{currentPlan?.goals.length || 0}</div>
             <div className="mt-1 text-xs text-slate-400">{t('weeklyReport.doneGoals', { count: currentPlan?.goals.filter((goal) => goal.isCompleted).length || 0 })}</div>
+          </div>
+        </section>
+
+        <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2 text-lg font-black text-slate-900">
+                <CheckCircle2 size={18} className="text-emerald-600" />
+                {t('weeklyReport.completedTasks')}
+              </div>
+              <p className="mt-2 text-sm text-slate-500">{t('weeklyReport.completedTasks.desc')}</p>
+            </div>
+            <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-right">
+              <div className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-600">{t('status.done')}</div>
+              <div className="mt-1 text-2xl font-black text-emerald-700">{completedTasks.length}</div>
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {completedTasks.length === 0 && (
+              <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">
+                {t('weeklyReport.completedTasks.empty')}
+              </div>
+            )}
+
+            {completedTasks.map((task) => (
+              <div key={task.id} className="rounded-[24px] border border-slate-200 bg-slate-50/80 p-4">
+                <div className="font-semibold text-slate-900">{task.title}</div>
+                <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
+                  {task.completedAt && (
+                    <span className="rounded-full bg-white px-2 py-1">
+                      {t('weeklyReport.completedAt', {
+                        date: formatDate(new Date(task.completedAt), {
+                          month: 'numeric',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        }),
+                      })}
+                    </span>
+                  )}
+                  {!hasPlanningDate(task.scheduledStart, task.dueAt) && (
+                    <span className="rounded-full bg-white px-2 py-1">
+                      {t('weeklyReport.unscheduled')}
+                    </span>
+                  )}
+                  {task.estimatedMinutes && <span className="rounded-full bg-white px-2 py-1">{task.estimatedMinutes} min</span>}
+                </div>
+              </div>
+            ))}
           </div>
         </section>
 

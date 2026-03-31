@@ -8,6 +8,7 @@ import {
   PomodoroHistory,
   PomodoroSettings,
   QuarterlyGoal,
+  ReviewHistoryDate,
   Task,
   TaskPlanningState,
   TaskReviewStatus,
@@ -19,7 +20,7 @@ import {
   WeeklyReport,
 } from '../types/index.js';
 
-export const STORE_VERSION = 8;
+export const STORE_VERSION = 9;
 
 export const nowIso = () => new Date().toISOString();
 
@@ -61,6 +62,7 @@ export type PersistedAppState = {
   aiSettings: AISettings;
   chatHistory: ChatMessage[];
   legacyData: LegacyData;
+  reviewHistoryDates: ReviewHistoryDate[];
   currentTaskId: string | null;
   isAIPanelOpen: boolean;
 };
@@ -135,6 +137,13 @@ export const migrateTask = (raw: Record<string, unknown>): Task => {
   const recurrence = typeof raw.recurrence === 'object' && raw.recurrence
     ? raw.recurrence as { frequency?: unknown; smartWorkdayOnly?: unknown; endDate?: unknown }
     : null;
+  const planningState = normalizePlanningState(raw.planningState) || inferPlanningState(scheduledStart, typeof raw.dueAt === 'string' ? raw.dueAt : scheduledEnd, createdAt);
+  const reviewAnchor = scheduledStart || (typeof raw.dueAt === 'string' ? raw.dueAt : undefined) || updatedAt;
+  const plannedForDate = typeof raw.plannedForDate === 'string'
+    ? raw.plannedForDate.slice(0, 10)
+    : planningState === 'today'
+      ? reviewAnchor.slice(0, 10)
+      : undefined;
 
   return {
     id: typeof raw.id === 'string' ? raw.id : crypto.randomUUID(),
@@ -145,7 +154,8 @@ export const migrateTask = (raw: Record<string, unknown>): Task => {
         ? raw.description
         : undefined,
     status: normalizeStatus(typeof raw.status === 'string' ? raw.status : done ? 'done' : 'todo'),
-    planningState: normalizePlanningState(raw.planningState) || inferPlanningState(scheduledStart, typeof raw.dueAt === 'string' ? raw.dueAt : scheduledEnd, createdAt),
+    planningState,
+    plannedForDate,
     estimatedMinutes: raw.estimatedMinutes === 15 || raw.estimatedMinutes === 30 || raw.estimatedMinutes === 60 || raw.estimatedMinutes === 90
       ? raw.estimatedMinutes
       : undefined,
@@ -332,6 +342,9 @@ export const migrateStore = (persisted: unknown): PersistedAppState => {
       weeklyPlans: Array.isArray(raw.weeklyPlans) ? raw.weeklyPlans as LegacyData['weeklyPlans'] : undefined,
       habits: Array.isArray(raw.habits) ? raw.habits as LegacyData['habits'] : undefined,
     },
+    reviewHistoryDates: Array.isArray(raw.reviewHistoryDates)
+      ? raw.reviewHistoryDates.filter((item): item is string => typeof item === 'string')
+      : [],
     isAIPanelOpen: typeof raw.isAIPanelOpen === 'boolean' ? raw.isAIPanelOpen : true,
   };
 };
