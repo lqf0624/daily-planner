@@ -50,6 +50,20 @@ jobs:
       - name: build frontend
         run: npm run build
 
+      - name: verify signing env
+        shell: bash
+        run: |
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY}" ]; then
+            echo "TAURI_SIGNING_PRIVATE_KEY=present"
+          else
+            echo "TAURI_SIGNING_PRIVATE_KEY=missing"
+          fi
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD}" ]; then
+            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=present"
+          else
+            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=missing"
+          fi
+
       - name: build tauri
         uses: tauri-apps/tauri-action@v0.6.2
         env:
@@ -64,5 +78,5 @@ jobs:
           prerelease: false
           args: ${{ matrix.args }}
           includeRelease: true
-          uploadUpdaterJson: true
+          includeUpdaterJson: true
           updaterJsonPreferNsis: true
