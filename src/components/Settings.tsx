@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Database, Download, FolderTree, Info, Plus, RefreshCcw, Settings as SettingsIcon, Trash2, Upload } from 'lucide-react';
 import { getVersion } from '@tauri-apps/api/app';
+import { invoke } from '@tauri-apps/api/core';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { readTextFile, writeTextFile } from '@tauri-apps/plugin-fs';
 import { useI18n } from '../i18n';
 import { useAppStore } from '../stores/useAppStore';
-import { checkForUpdates, relaunchApp, supportsUpdater } from '../services/updater';
+import { checkForUpdates, RELEASES_URL, relaunchApp, supportsUpdater } from '../services/updater';
+import { isTauriRuntime } from '../utils/runtime';
 import { Button } from './ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 import { Input } from './ui/input';
 
 interface SettingsProps {
@@ -15,25 +17,57 @@ interface SettingsProps {
   onClose: () => void;
 }
 
+const inferBrowserPlatform = () => {
+  if (typeof navigator === 'undefined') return 'unknown';
+  return /mac/i.test(navigator.userAgent) ? 'macos' : 'windows';
+};
+
+const macUpdateCopy = {
+  'zh-CN': {
+    status: '\u006d\u0061\u0063 \u7248\u5f53\u524d\u4e0d\u652f\u6301\u5e94\u7528\u5185\u81ea\u52a8\u66f4\u65b0',
+    description: '\u7531\u4e8e\u5f53\u524d\u6ca1\u6709 Apple Developer \u7b7e\u540d\u4e0e\u516c\u8bc1\u94fe\u8def\uff0cmac \u7248\u8bf7\u524d\u5f80 GitHub Releases \u624b\u52a8\u4e0b\u8f7d\u65b0\u7248\u672c\u3002',
+    action: '\u6253\u5f00\u4e0b\u8f7d\u9875',
+  },
+  en: {
+    status: 'In-app auto update is unavailable on macOS right now',
+    description: 'Without Apple signing and notarization, the macOS build must be updated manually from GitHub Releases.',
+    action: 'Open releases',
+  },
+  de: {
+    status: 'In-App-Updates sind auf macOS derzeit nicht verfuegbar',
+    description: 'Ohne Apple-Signierung und Notarisierung muss die macOS-Version manuell ueber GitHub Releases aktualisiert werden.',
+    action: 'Releases oeffnen',
+  },
+} as const;
+
 const Settings = ({ isOpen, onClose }: SettingsProps) => {
-  const { t, preference, setPreference } = useI18n();
+  const { locale, t, preference, setPreference } = useI18n();
   const { aiSettings, lists, updateAISettings, importData, addList, updateList, deleteList } = useAppStore();
   const [version, setVersion] = useState('0.0.0');
   const [listName, setListName] = useState('');
   const [listColor, setListColor] = useState('#2563eb');
   const [updateStatus, setUpdateStatus] = useState('');
+  const [platform, setPlatform] = useState('unknown');
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [isInstallingUpdate, setIsInstallingUpdate] = useState(false);
   const [availableUpdateVersion, setAvailableUpdateVersion] = useState<string | null>(null);
   const [updateNotes, setUpdateNotes] = useState<string | null>(null);
   const pendingUpdateRef = useRef<Awaited<ReturnType<typeof checkForUpdates>>>(null);
+  const isMac = platform === 'macos';
+  const macCopy = macUpdateCopy[locale];
 
   useEffect(() => {
-    setUpdateStatus(t('settings.update.idle'));
-  }, [t]);
+    setUpdateStatus(isMac ? macCopy.status : t('settings.update.idle'));
+  }, [isMac, macCopy.status, t]);
 
   useEffect(() => {
     getVersion().then(setVersion).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    setPlatform(inferBrowserPlatform());
+    if (!isTauriRuntime()) return;
+    invoke<string>('get_runtime_platform').then(setPlatform).catch(() => undefined);
   }, []);
 
   const handleExport = async () => {
@@ -57,6 +91,13 @@ const Settings = ({ isOpen, onClose }: SettingsProps) => {
   };
 
   const handleCheckUpdate = useCallback(async (silent = false) => {
+    if (isMac) {
+      setAvailableUpdateVersion(null);
+      setUpdateNotes(null);
+      setUpdateStatus(macCopy.status);
+      return;
+    }
+
     if (!supportsUpdater()) {
       setUpdateStatus(t('settings.update.unsupported'));
       return;
@@ -84,12 +125,12 @@ const Settings = ({ isOpen, onClose }: SettingsProps) => {
     } finally {
       setIsCheckingUpdate(false);
     }
-  }, [t]);
+  }, [isMac, macCopy.status, t]);
 
   useEffect(() => {
-    if (!isOpen || !supportsUpdater()) return;
+    if (!isOpen || isMac || !supportsUpdater()) return;
     void handleCheckUpdate(true);
-  }, [handleCheckUpdate, isOpen]);
+  }, [handleCheckUpdate, isMac, isOpen]);
 
   const handleInstallUpdate = async () => {
     const update = pendingUpdateRef.current;
@@ -111,16 +152,19 @@ const Settings = ({ isOpen, onClose }: SettingsProps) => {
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-h-[92vh] w-[min(94vw,1120px)] max-w-[1120px] overflow-hidden rounded-[32px] border-slate-200 bg-white p-0">
-        <DialogHeader className="border-b border-slate-100 p-6">
-          <div className="flex items-center justify-between gap-4">
-            <DialogTitle className="flex items-center gap-3 text-2xl font-black text-slate-900">
-              <div className="rounded-2xl bg-primary/10 p-2"><SettingsIcon size={20} className="text-primary" /></div>
-              {t('settings.title')}
-            </DialogTitle>
-            <Button variant="outline" className="rounded-2xl" onClick={onClose}>{t('common.close')}</Button>
-          </div>
-        </DialogHeader>
+        <DialogContent className="max-h-[92vh] w-[min(94vw,1120px)] max-w-[1120px] overflow-hidden rounded-[32px] border-slate-200 bg-white p-0">
+          <DialogHeader className="border-b border-slate-100 p-6">
+            <div className="flex items-center justify-between gap-4">
+              <DialogTitle className="flex items-center gap-3 text-2xl font-black text-slate-900">
+                <div className="rounded-2xl bg-primary/10 p-2"><SettingsIcon size={20} className="text-primary" /></div>
+                {t('settings.title')}
+              </DialogTitle>
+              <Button variant="outline" className="rounded-2xl" onClick={onClose}>{t('common.close')}</Button>
+            </div>
+            <DialogDescription className="sr-only">
+              {t('settings.title')} - {t('settings.data.desc')}
+            </DialogDescription>
+          </DialogHeader>
 
         <div className="grid max-h-[calc(92vh-96px)] gap-6 overflow-y-auto p-6 xl:grid-cols-[1.1fr_1fr_0.95fr]">
           <section data-testid="settings-ai" className="rounded-[28px] border border-slate-200 bg-slate-50/70 p-5">
@@ -180,11 +224,24 @@ const Settings = ({ isOpen, onClose }: SettingsProps) => {
                   <div className="font-semibold text-slate-900">{t('settings.updater')}</div>
                   <div data-testid="settings-update-status" className="mt-1 text-sm text-slate-500">{updateStatus}</div>
                 </div>
-                <Button data-testid="settings-check-update" variant="outline" className="rounded-2xl" onClick={() => void handleCheckUpdate(false)} disabled={isCheckingUpdate}>
-                  <RefreshCcw size={16} className="mr-2" />
-                  {isCheckingUpdate ? t('settings.checking') : t('settings.check')}
-                </Button>
+                {isMac ? (
+                  <Button
+                    data-testid="settings-open-releases"
+                    variant="outline"
+                    className="rounded-2xl"
+                    onClick={() => window.open(RELEASES_URL, '_blank', 'noopener,noreferrer')}
+                  >
+                    <Download size={16} className="mr-2" />
+                    {macCopy.action}
+                  </Button>
+                ) : (
+                  <Button data-testid="settings-check-update" variant="outline" className="rounded-2xl" onClick={() => void handleCheckUpdate(false)} disabled={isCheckingUpdate}>
+                    <RefreshCcw size={16} className="mr-2" />
+                    {isCheckingUpdate ? t('settings.checking') : t('settings.check')}
+                  </Button>
+                )}
               </div>
+              {isMac ? <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">{macCopy.description}</div> : null}
               {availableUpdateVersion && (
                 <div className="mt-4 rounded-2xl bg-slate-50 p-4">
                   <div className="text-sm font-semibold text-slate-900">{t('settings.update.available', { version: availableUpdateVersion })}</div>

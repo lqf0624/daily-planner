@@ -1,6 +1,6 @@
 [package]
 name = "daily-planner"
-version = "0.3.5"
+version = "0.3.6"
 description = "A Daily Planner AI App"
 authors = ["lqf0624"]
 edition = "2021"

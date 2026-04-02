@@ -24,13 +24,18 @@ const GUIDE_MARKER = 'daily-planner-guide-v2-seen';
 
 const App = () => {
   const { locale, t } = useI18n();
-  const tasks = useAppStore((state) => state.tasks);
-  const weeklyPlans = useAppStore((state) => state.weeklyPlans);
-  const goals = useAppStore((state) => state.goals);
-  const weeklyReports = useAppStore((state) => state.weeklyReports);
-  const habits = useAppStore((state) => state.habits);
-  const chatHistory = useAppStore((state) => state.chatHistory);
-  const currentTaskId = useAppStore((state) => state.currentTaskId);
+  const tasksCount = useAppStore((state) => state.tasks.length);
+  const weeklyPlansCount = useAppStore((state) => state.weeklyPlans.length);
+  const goalsCount = useAppStore((state) => state.goals.length);
+  const activeGoalsCount = useAppStore((state) => state.goals.filter((goal) => !goal.isCompleted).length);
+  const weeklyReportsCount = useAppStore((state) => state.weeklyReports.length);
+  const habitsCount = useAppStore((state) => state.habits.length);
+  const chatHistoryCount = useAppStore((state) => state.chatHistory.length);
+  const inboxCount = useAppStore((state) => state.tasks.filter((task) => task.status === 'todo' && task.planningState === 'inbox').length);
+  const activeTaskTitle = useAppStore((state) => {
+    const currentTask = state.currentTaskId ? state.tasks.find((task) => task.id === state.currentTaskId) : null;
+    return currentTask?.title || getOngoingTask(state.tasks, new Date())?.title || null;
+  });
   const _hasHydrated = useAppStore((state) => state._hasHydrated);
   const setCurrentTaskId = useAppStore((state) => state.setCurrentTaskId);
   const isSettingsOpen = useAppStore((state) => state.isSettingsOpen);
@@ -62,11 +67,12 @@ const App = () => {
     };
 
     const run = () => {
+      const { tasks: currentTasks } = useAppStore.getState();
       const now = new Date();
       const today = format(now, 'yyyy-MM-dd');
       const currentMinute = format(now, 'yyyy-MM-dd HH:mm');
 
-      tasks.forEach((task) => {
+      currentTasks.forEach((task) => {
         if (task.status !== 'todo' || !task.scheduledStart) return;
         const key = `${task.id}-${currentMinute}`;
         if (notifiedRef.current.has(key)) return;
@@ -76,7 +82,7 @@ const App = () => {
         }
       });
 
-      const overdue = tasks.find((task) => task.status === 'todo' && task.dueAt && format(parseISO(task.dueAt), 'yyyy-MM-dd') < today);
+      const overdue = currentTasks.find((task) => task.status === 'todo' && task.dueAt && format(parseISO(task.dueAt), 'yyyy-MM-dd') < today);
       if (!overdue) return;
 
       const key = `overdue-${today}-${overdue.id}`;
@@ -88,18 +94,18 @@ const App = () => {
     run();
     const timer = setInterval(run, 30000);
     return () => clearInterval(timer);
-  }, [tasks, t, view]);
+  }, [t, view]);
 
   useEffect(() => {
     if (view !== 'main' || !_hasHydrated || typeof window === 'undefined' || typeof localStorage === 'undefined') return;
     if (localStorage.getItem(LEGACY_IMPORT_MARKER)) return;
 
-    const hasCurrentData = tasks.length > 0
-      || goals.length > 0
-      || weeklyPlans.length > 0
-      || weeklyReports.length > 0
-      || habits.length > 0
-      || chatHistory.length > 0;
+    const hasCurrentData = tasksCount > 0
+      || goalsCount > 0
+      || weeklyPlansCount > 0
+      || weeklyReportsCount > 0
+      || habitsCount > 0
+      || chatHistoryCount > 0;
 
     if (hasCurrentData) {
       localStorage.setItem(LEGACY_IMPORT_MARKER, JSON.stringify({ skippedAt: new Date().toISOString(), reason: 'current-store-not-empty' }));
@@ -123,7 +129,7 @@ const App = () => {
     return () => {
       cancelled = true;
     };
-  }, [_hasHydrated, chatHistory.length, goals.length, habits.length, importData, tasks.length, view, weeklyPlans.length, weeklyReports.length]);
+  }, [_hasHydrated, chatHistoryCount, goalsCount, habitsCount, importData, tasksCount, view, weeklyPlansCount, weeklyReportsCount]);
 
   useEffect(() => {
     if (view !== 'main' || !_hasHydrated) return;
@@ -168,10 +174,6 @@ const App = () => {
       </div>
     );
   }
-
-  const activeTask = tasks.find((task) => task.id === currentTaskId) || getOngoingTask(tasks, new Date());
-  const activeGoals = goals.filter((goal) => !goal.isCompleted).length;
-  const inboxCount = tasks.filter((task) => task.status === 'todo' && task.planningState === 'inbox').length;
 
   const content = {
     inbox: <InboxWorkspace />,
@@ -221,12 +223,12 @@ const App = () => {
         <div className="mt-8 grid gap-3">
           <div className="rounded-[24px] bg-slate-50 p-4">
             <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{copy.app.currentFocus}</div>
-            <div className="mt-2 text-sm font-semibold text-slate-800">{activeTask?.title || copy.app.noActiveFocusTask}</div>
+            <div className="mt-2 text-sm font-semibold text-slate-800">{activeTaskTitle || copy.app.noActiveFocusTask}</div>
           </div>
           <div className="rounded-[24px] bg-slate-50 p-4">
             <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{copy.app.systemState}</div>
             <div className="mt-2 text-sm font-semibold text-slate-800">{copy.app.inboxCount(inboxCount)}</div>
-            <div className="mt-1 text-xs text-slate-500">{copy.app.activeGoals(activeGoals)}</div>
+            <div className="mt-1 text-xs text-slate-500">{copy.app.activeGoals(activeGoalsCount)}</div>
           </div>
         </div>
 

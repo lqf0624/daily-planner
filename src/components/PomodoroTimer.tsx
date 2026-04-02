@@ -7,6 +7,7 @@ import { usePomodoro } from '../contexts/PomodoroContext';
 import { useHoldAction } from '../hooks/useHoldAction';
 import { useAppStore } from '../stores/useAppStore';
 import { readFloatingMode, readFloatingSize } from '../utils/floatingWindow';
+import { isTauriRuntime } from '../utils/runtime';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { Input } from './ui/input';
@@ -27,25 +28,31 @@ const PomodoroTimer = () => {
     isActive,
     mode,
     sessionsCompleted,
+    currentTaskName,
     toggleTimer,
     resetTimer,
     skipMode,
   } = usePomodoro();
-  const { tasks, currentTaskId, setCurrentTaskId, pomodoroHistory } = useAppStore();
+  const tasks = useAppStore((state) => state.tasks);
+  const currentTaskId = useAppStore((state) => state.currentTaskId);
+  const setCurrentTaskId = useAppStore((state) => state.setCurrentTaskId);
+  const todayKey = format(new Date(), 'yyyy-MM-dd');
+  const todayStats = useAppStore((state) => state.pomodoroHistory[todayKey]);
+  const totalFocus = useAppStore((state) => Object.values(state.pomodoroHistory).reduce((sum, item) => sum + item.minutes, 0));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [platform, setPlatform] = useState('unknown');
 
   useEffect(() => {
     setPlatform(inferBrowserPlatform());
+    if (!isTauriRuntime()) return;
     invoke<string>('get_runtime_platform').then(setPlatform).catch(() => undefined);
   }, []);
 
   const minutes = Math.floor(timeLeft / 60).toString().padStart(2, '0');
   const seconds = (timeLeft % 60).toString().padStart(2, '0');
-  const availableTasks = tasks.filter((task) => task.status === 'todo');
+  const availableTasks = useMemo(() => tasks.filter((task) => task.status === 'todo'), [tasks]);
   const boundTask = availableTasks.find((task) => task.id === currentTaskId);
-  const todayStats = pomodoroHistory[format(new Date(), 'yyyy-MM-dd')];
-  const totalFocus = useMemo(() => Object.values(pomodoroHistory).reduce((sum, item) => sum + item.minutes, 0), [pomodoroHistory]);
+  const displayBoundTaskName = currentTaskName || boundTask?.title || null;
   const isMac = platform === 'macos';
   const holdSkip = useHoldAction({ onComplete: skipMode });
 
@@ -83,7 +90,7 @@ const PomodoroTimer = () => {
               <option value="">{t('pomodoro.unbound')}</option>
               {availableTasks.map((task) => <option key={task.id} value={task.id}>{task.title}</option>)}
             </select>
-            {boundTask && <div className="mt-3 rounded-2xl bg-white p-3 text-sm text-slate-600">{t('pomodoro.bound', { title: boundTask.title })}</div>}
+            {displayBoundTaskName && <div className="mt-3 rounded-2xl bg-white p-3 text-sm text-slate-600">{t('pomodoro.bound', { title: displayBoundTaskName })}</div>}
           </div>
 
           <div className="mt-8 text-[112px] font-black leading-none tracking-[-0.08em] text-slate-900">{minutes}:{seconds}</div>

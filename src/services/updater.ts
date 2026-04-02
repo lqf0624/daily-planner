@@ -19,6 +19,8 @@ type UpdateHandle = {
   downloadAndInstall: () => Promise<void>;
 };
 
+export const RELEASES_URL = 'https://github.com/lqf0624/daily-planner/releases';
+
 declare global {
   interface Window {
     __TAURI__?: unknown;

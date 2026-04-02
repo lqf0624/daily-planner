@@ -1,4 +1,4 @@
-import { isAfter, isSameDay, parseISO } from 'date-fns';
+import { isSameDay, parseISO } from 'date-fns';
 import {
   AISettings,
   ChatMessage,
@@ -100,7 +100,7 @@ const inferPlanningState = (scheduledStart?: string, dueAt?: string, createdAt?:
   if (!target) return 'inbox';
 
   const date = parseISO(target);
-  if (isSameDay(date, now) || !isAfter(date, now)) return 'today';
+  if (isSameDay(date, now)) return 'today';
   return 'later';
 };
 

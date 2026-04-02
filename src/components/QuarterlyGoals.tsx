@@ -1,27 +1,35 @@
 import { useMemo, useState } from 'react';
 import { differenceInCalendarDays, endOfQuarter, getQuarter, startOfQuarter } from 'date-fns';
-import { BarChart3, Link2, Plus, Target, Trash2 } from 'lucide-react';
+import { BarChart3, ChevronLeft, ChevronRight, Link2, Plus, Target, Trash2 } from 'lucide-react';
 import { getReviewPanelsCopy } from '../content/reviewPanelsCopy';
 import { useI18n } from '../i18n';
 import { useAppStore } from '../stores/useAppStore';
 import { QuarterlyGoal } from '../types';
 import { Button } from './ui/button';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { Input } from './ui/input';
 
-const createGoal = (): QuarterlyGoal => {
-  const now = new Date();
+const createGoal = (quarter = getQuarter(new Date()), year = new Date().getFullYear()): QuarterlyGoal => {
   return {
     id: '',
     title: '',
     description: '',
-    quarter: getQuarter(now),
-    year: now.getFullYear(),
+    quarter,
+    year,
     progress: 0,
     isCompleted: false,
     weeklyGoalIds: [],
     taskIds: [],
   };
+};
+
+const getQuarterDate = (year: number, quarter: number) => new Date(year, (quarter - 1) * 3, 1);
+
+const shiftQuarter = (year: number, quarter: number, offset: number) => {
+  const shifted = quarter + offset;
+  if (shifted < 1) return { year: year - 1, quarter: 4 };
+  if (shifted > 4) return { year: year + 1, quarter: 1 };
+  return { year, quarter: shifted };
 };
 
 const QuarterlyGoals = () => {
@@ -31,17 +39,35 @@ const QuarterlyGoals = () => {
   const [draft, setDraft] = useState<QuarterlyGoal>(createGoal());
   const [open, setOpen] = useState(false);
   const now = new Date();
-  const quarter = getQuarter(now);
-  const year = now.getFullYear();
+  const currentQuarter = getQuarter(now);
+  const currentYear = now.getFullYear();
+  const [selectedQuarter, setSelectedQuarter] = useState(currentQuarter);
+  const [selectedYear, setSelectedYear] = useState(currentYear);
 
-  const currentGoals = useMemo(() => goals.filter((goal) => goal.quarter === quarter && goal.year === year), [goals, quarter, year]);
-  const quarterStart = startOfQuarter(now);
-  const quarterEnd = endOfQuarter(now);
-  const passedDays = differenceInCalendarDays(now, quarterStart) + 1;
+  const selectedDate = useMemo(() => getQuarterDate(selectedYear, selectedQuarter), [selectedQuarter, selectedYear]);
+  const isCurrentPeriod = selectedQuarter === currentQuarter && selectedYear === currentYear;
+  const isFuturePeriod = selectedDate > now && !isCurrentPeriod;
+  const currentGoals = useMemo(
+    () => goals.filter((goal) => goal.quarter === selectedQuarter && goal.year === selectedYear),
+    [goals, selectedQuarter, selectedYear],
+  );
+  const quarterStart = startOfQuarter(selectedDate);
+  const quarterEnd = endOfQuarter(selectedDate);
   const totalDays = differenceInCalendarDays(quarterEnd, quarterStart) + 1;
+  const passedDays = isCurrentPeriod
+    ? Math.min(totalDays, differenceInCalendarDays(now, quarterStart) + 1)
+    : selectedDate > now
+      ? 0
+      : totalDays;
+
+  const jumpQuarter = (offset: number) => {
+    const next = shiftQuarter(selectedYear, selectedQuarter, offset);
+    setSelectedYear(next.year);
+    setSelectedQuarter(next.quarter);
+  };
 
   const openDialog = (goal?: QuarterlyGoal) => {
-    setDraft(goal ? { ...goal } : createGoal());
+    setDraft(goal ? { ...goal } : createGoal(selectedQuarter, selectedYear));
     setOpen(true);
   };
 
@@ -59,12 +85,42 @@ const QuarterlyGoals = () => {
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">{copy.eyebrow}</p>
             <h2 className="mt-2 text-3xl font-black tracking-tight text-slate-900">{copy.heading}</h2>
-            <p className="mt-2 text-sm text-slate-500">{copy.description(passedDays, totalDays)}</p>
+            <p className="mt-2 text-sm text-slate-500">
+              {isCurrentPeriod
+                ? copy.description(passedDays, totalDays)
+                : isFuturePeriod
+                  ? copy.futureDescription(copy.periodLabel(selectedQuarter, selectedYear))
+                  : copy.historyDescription(copy.periodLabel(selectedQuarter, selectedYear), totalDays)}
+            </p>
           </div>
-          <Button data-testid="quarterly-goals-new" className="rounded-2xl" onClick={() => openDialog()}>
-            <Plus size={16} className="mr-2" />
-            {copy.newGoal}
-          </Button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button variant="outline" className="rounded-2xl" onClick={() => jumpQuarter(-1)}>
+              <ChevronLeft size={16} className="mr-2" />
+              {copy.previousQuarter}
+            </Button>
+            <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm">
+              <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{copy.selectedPeriod}</div>
+              <div className="mt-1 font-semibold text-slate-900">{copy.periodLabel(selectedQuarter, selectedYear)}</div>
+            </div>
+            <Button variant="outline" className="rounded-2xl" onClick={() => jumpQuarter(1)}>
+              {copy.nextQuarter}
+              <ChevronRight size={16} className="ml-2" />
+            </Button>
+            {!isCurrentPeriod ? (
+              <Button variant="outline" className="rounded-2xl" onClick={() => { setSelectedQuarter(currentQuarter); setSelectedYear(currentYear); }}>
+                {copy.jumpToCurrent}
+              </Button>
+            ) : null}
+            <Button data-testid="quarterly-goals-new" className="rounded-2xl" onClick={() => openDialog()}>
+              <Plus size={16} className="mr-2" />
+              {copy.newGoal}
+            </Button>
+          </div>
+        </div>
+        <div className="mt-5">
+          <span className={`rounded-full px-3 py-1 text-xs font-semibold ${isCurrentPeriod ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+            {isCurrentPeriod ? copy.currentQuarterBadge : isFuturePeriod ? copy.futureQuarterBadge : copy.historyQuarterBadge}
+          </span>
         </div>
       </section>
 
@@ -114,6 +170,9 @@ const QuarterlyGoals = () => {
         <DialogContent className="max-h-[90vh] w-[min(92vw,560px)] max-w-[560px] overflow-hidden rounded-[28px] border-slate-200 bg-white p-0">
           <DialogHeader className="px-6 pt-6">
             <DialogTitle className="text-2xl font-black text-slate-900">{draft.id ? copy.editTitle : copy.createTitle}</DialogTitle>
+            <DialogDescription className="sr-only">
+              {draft.id ? copy.editTitle : copy.createTitle} - {copy.descriptionPlaceholder}
+            </DialogDescription>
           </DialogHeader>
           <div className="grid max-h-[calc(90vh-132px)] gap-4 overflow-y-auto px-6 py-2">
             <Input data-testid="quarterly-goal-title" value={draft.title} onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} className="h-12 rounded-2xl border-slate-200 bg-slate-50" placeholder={copy.titlePlaceholder} />

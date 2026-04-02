@@ -107,8 +107,7 @@ const TodayWorkspace = () => {
   const setTaskPlanningState = useAppStore((state) => state.setTaskPlanningState);
   const updateTask = useAppStore((state) => state.updateTask);
   const deleteTask = useAppStore((state) => state.deleteTask);
-  const pomodoroHistory = useAppStore((state) => state.pomodoroHistory);
-  const { timeLeft, isActive, mode, pomodoroSettings, updatePomodoroSettings, toggleTimer, resetTimer } = usePomodoro();
+  const { timeLeft, isActive, mode, pomodoroSettings, updatePomodoroSettings, toggleTimer, resetTimer, currentTaskName } = usePomodoro();
   const [view, setView] = useState<'plan' | 'calendar'>('plan');
   const [todayAssistantMode, setTodayAssistantMode] = useState<'plan' | 'focus'>('plan');
   const [scheduleTask, setScheduleTask] = useState<Task | null>(null);
@@ -131,14 +130,16 @@ const TodayWorkspace = () => {
     () => todayTasks.filter((task) => task.id !== highlightTask?.id && !supportTasks.some((item) => item.id === task.id)),
     [highlightTask?.id, supportTasks, todayTasks],
   );
-  const activeFocusTask = tasks.find((task) => task.id === currentTaskId) || highlightTask;
+  const activeFocusTask = tasks.find((task) => task.id === currentTaskId) || (!currentTaskName ? highlightTask : null);
+  const activeFocusTaskTitle = currentTaskName || activeFocusTask?.title || focusCopy.noTask;
   const timerLabel = `${Math.floor(timeLeft / 60).toString().padStart(2, '0')}:${(timeLeft % 60).toString().padStart(2, '0')}`;
   const todayKey = format(new Date(), 'yyyy-MM-dd');
+  const todayPomodoroStats = useAppStore((state) => state.pomodoroHistory[todayKey]);
   const completedToday = useMemo(
     () => tasks.filter((task) => task.status === 'done' && task.completedAt?.slice(0, 10) === todayKey).length,
     [tasks, todayKey],
   );
-  const todayStats = pomodoroHistory[todayKey] || { minutes: 0, sessions: 0 };
+  const todayStats = todayPomodoroStats || { minutes: 0, sessions: 0 };
   const isMac = platform === 'macos';
   const recommendedRhythm = useMemo(() => getRecommendedFocusRhythm(activeFocusTask), [activeFocusTask]);
   const focusBrief = useMemo(() => buildFocusSessionBrief(activeFocusTask), [activeFocusTask]);
@@ -200,6 +201,22 @@ const TodayWorkspace = () => {
   const startFocus = (taskId: string) => {
     setCurrentTaskId(taskId);
     if (!isActive) toggleTimer();
+  };
+
+  const buildFocusAction = (taskId: string): TaskAction => {
+    if (currentTaskId === taskId) {
+      return {
+        label: isActive ? focusCopy.pause : copy.taskChip.focus,
+        onClick: toggleTimer,
+        variant: 'default',
+      };
+    }
+
+    return {
+      label: copy.taskChip.focus,
+      onClick: () => startFocus(taskId),
+      variant: 'default',
+    };
   };
 
   const completeTask = (task: Task) => {
@@ -341,8 +358,8 @@ const TodayWorkspace = () => {
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Button data-testid="today-highlight-start" className="rounded-2xl bg-emerald-600 px-5 text-white hover:bg-emerald-700" onClick={() => startFocus(highlightTask.id)}>
-                      <ArrowRight size={16} className="mr-2" />
-                      {copy.startFocus}
+                      {currentTaskId === highlightTask.id && isActive ? <Pause size={16} className="mr-2" /> : <ArrowRight size={16} className="mr-2" />}
+                      {currentTaskId === highlightTask.id && isActive ? focusCopy.pause : copy.startFocus}
                     </Button>
                     <Button data-testid="today-highlight-schedule" variant="outline" className="rounded-2xl border-emerald-200 bg-white/80" onClick={() => openScheduleDialog(highlightTask)}>{copy.taskChip.schedule}</Button>
                     <Button data-testid="today-highlight-complete" variant="outline" className="rounded-2xl" onClick={() => completeTask(highlightTask)}>
@@ -379,7 +396,7 @@ const TodayWorkspace = () => {
                   task={task}
                   copy={copy}
                   actions={[
-                    { label: copy.taskChip.focus, onClick: () => startFocus(task.id), variant: 'default' },
+                    buildFocusAction(task.id),
                     { label: copy.taskChip.highlight, onClick: () => promoteTaskToHighlight(task.id) },
                     { label: copy.taskChip.schedule, onClick: () => openScheduleDialog(task) },
                     { label: copy.taskChip.later, onClick: () => setTaskPlanningState(task.id, 'later') },
@@ -409,7 +426,7 @@ const TodayWorkspace = () => {
                     { label: copy.taskChip.highlight, onClick: () => promoteTaskToHighlight(task.id) },
                     { label: copy.taskChip.schedule, onClick: () => openScheduleDialog(task) },
                     { label: copy.taskChip.later, onClick: () => setTaskPlanningState(task.id, 'later') },
-                    { label: copy.taskChip.focus, onClick: () => startFocus(task.id), variant: 'ghost' },
+                    { ...buildFocusAction(task.id), variant: currentTaskId === task.id ? 'default' : 'ghost' },
                   ]}
                 />
               ))}
@@ -435,7 +452,7 @@ const TodayWorkspace = () => {
                     { label: copy.taskChip.support, onClick: () => promoteTaskToSupport(task.id), variant: 'default' },
                     { label: copy.taskChip.highlight, onClick: () => promoteTaskToHighlight(task.id), variant: 'secondary' },
                     { label: copy.taskChip.schedule, onClick: () => openScheduleDialog(task) },
-                    { label: copy.taskChip.focus, onClick: () => startFocus(task.id), variant: 'ghost' },
+                    { ...buildFocusAction(task.id), variant: currentTaskId === task.id ? 'default' : 'ghost' },
                     { label: copy.taskChip.delete, onClick: () => deleteTask(task.id), variant: 'destructive', className: 'rounded-2xl' },
                   ]}
                 />
@@ -463,7 +480,7 @@ const TodayWorkspace = () => {
             </div>
             <div className="mt-4 rounded-[28px] bg-slate-50 p-5">
               <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{focusCopy.currentTask}</div>
-              <div className="mt-2 text-lg font-semibold text-slate-900">{activeFocusTask?.title || focusCopy.noTask}</div>
+              <div className="mt-2 text-lg font-semibold text-slate-900">{activeFocusTaskTitle}</div>
               <div className="mt-5 text-center text-5xl font-black tracking-[-0.06em] text-slate-900" data-testid="today-focus-timer">{timerLabel}</div>
               <div className="mt-4 text-center text-sm text-slate-500">{focusStatus}</div>
               <div className="mt-5 flex flex-wrap justify-center gap-2">

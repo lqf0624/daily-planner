@@ -253,6 +253,12 @@ Object.assign(baseZh, {
   'weeklyReport.prepare': '生成本周草稿',
 });
 
+Object.assign(baseZh, {
+  'pomodoro.work': '\u4e13\u6ce8',
+  'pomodoro.shortBreak': '\u77ed\u4f11\u606f',
+  'pomodoro.longBreak': '\u957f\u4f11\u606f',
+});
+
 Object.assign(baseEn, {
   'settings.update.idle': 'No update check has run yet',
   'settings.update.unsupported': 'Auto update is not supported in this environment',

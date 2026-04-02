@@ -3,7 +3,7 @@ import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { LogicalSize } from '@tauri-apps/api/dpi';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { EyeOff, FastForward, PanelTop, Pause, Play, RotateCcw } from 'lucide-react';
+import { EyeOff, FastForward, MoreHorizontal, PanelTop, Pause, Play, RotateCcw } from 'lucide-react';
 import { getFloatingCopy } from '../content/floatingCopy';
 import { useI18n } from '../i18n';
 import { usePomodoro } from '../contexts/PomodoroContext';
@@ -174,6 +174,12 @@ const FloatingPomodoro = () => {
   const displayTaskName = currentTaskName || currentTask?.title || boundTaskName || copy.labels.unboundTask;
   const modeLabel = mode === 'work' ? t('pomodoro.work') : mode === 'shortBreak' ? t('pomodoro.shortBreak') : t('pomodoro.longBreak');
   const compactModeLabel = mode === 'work' ? copy.labels.focus : copy.labels.break;
+  const miniToggleLabel = isActive
+    ? locale === 'de' ? 'Timer pausieren' : locale === 'zh-CN' ? '\u6682\u505c\u8ba1\u65f6' : 'Pause timer'
+    : locale === 'de' ? 'Timer starten' : locale === 'zh-CN' ? '\u5f00\u59cb\u8ba1\u65f6' : 'Start timer';
+  const resetLabel = locale === 'de' ? 'Runde zuruecksetzen' : locale === 'zh-CN' ? '\u91cd\u7f6e\u672c\u8f6e' : 'Reset round';
+  const taskLabel = locale === 'de' ? 'Aufgabe' : locale === 'zh-CN' ? '\u4efb\u52a1' : 'Task';
+  const rhythmLabel = locale === 'de' ? 'Rhythmus' : locale === 'zh-CN' ? '\u8282\u594f' : 'Rhythm';
   const holdSkip = useHoldAction({ onComplete: skipMode });
 
   useEffect(() => {
@@ -279,10 +285,10 @@ const FloatingPomodoro = () => {
 
     const syncConstraints = async () => {
       if (floatingMode === 'mini') {
-        const miniHeight = menu ? 122 : 64;
+        const miniHeight = menu ? 120 : 56;
         await appWindow.setSizeConstraints({
-          minWidth: 220,
-          maxWidth: 420,
+          minWidth: 208,
+          maxWidth: 320,
           minHeight: miniHeight,
           maxHeight: miniHeight,
         });
@@ -290,9 +296,9 @@ const FloatingPomodoro = () => {
       }
 
       await appWindow.setSizeConstraints({
-        minWidth: 280,
+        minWidth: 292,
         maxWidth: 560,
-        minHeight: 168,
+        minHeight: 188,
         maxHeight: 360,
       });
     };
@@ -310,7 +316,7 @@ const FloatingPomodoro = () => {
 
     const expandForMenu = async () => {
       miniCollapsedSizeRef.current = readFloatingSize('mini');
-      await appWindow.setSize(new LogicalSize(miniCollapsedSizeRef.current.width, 122));
+      await appWindow.setSize(new LogicalSize(miniCollapsedSizeRef.current.width, 120));
     };
 
     if (menu) {
@@ -321,7 +327,7 @@ const FloatingPomodoro = () => {
     restoreMiniSize().catch(() => undefined);
   }, [appWindow, floatingMode, menu]);
 
-  const compact = floatingMode === 'mini' || frame.width < 276 || frame.height < 86;
+  const compact = floatingMode === 'mini' || frame.width < 252 || frame.height < 84;
   const timerClass = compact ? 'text-[28px]' : frame.width < 320 || frame.height < 176 ? 'text-[42px]' : 'text-[48px]';
 
   const closeFloating = () => {
@@ -357,41 +363,33 @@ const FloatingPomodoro = () => {
         onClick={() => setMenu(null)}
         onContextMenu={openMenu}
       >
-        <div data-testid="floating-frame" className="relative flex h-full w-full items-center gap-2 border px-3 py-2 pr-5 shadow-[0_10px_24px_rgba(15,23,42,0.12)]" style={{ background: palette.mini, borderColor: palette.border }}>
+        <div data-testid="floating-frame" className="relative flex h-full w-full items-center gap-1.5 border px-2.5 py-1.5 pr-4 shadow-[0_10px_24px_rgba(15,23,42,0.12)]" style={{ background: palette.mini, borderColor: palette.border }}>
           <div
             data-testid="floating-drag-handle"
-            className="min-w-0 flex-1 cursor-grab active:cursor-grabbing"
+            className="min-w-0 w-[42px] shrink-0 cursor-grab active:cursor-grabbing"
             onMouseDown={() => appWindow?.startDragging().catch(() => undefined)}
             title={displayTaskName}
           >
-            <div className={`text-[9px] font-semibold uppercase tracking-[0.24em] ${styles.subtle}`}>{compactModeLabel}</div>
-            <div className={`truncate text-[11px] font-semibold ${styles.text}`}>{displayTaskName}</div>
+            <div className={`truncate text-[9px] font-semibold uppercase tracking-[0.18em] ${styles.subtle}`}>{compactModeLabel}</div>
+            <div className={`truncate text-[10px] font-semibold ${styles.text}`}>{displayTaskName}</div>
           </div>
 
-          <div data-testid="floating-timer" className={`shrink-0 font-black leading-none tracking-[-0.06em] ${timerClass} ${styles.text}`}>{minutes}:{seconds}</div>
+          <div data-testid="floating-timer" className={`min-w-0 flex-1 text-center font-black leading-none tracking-[-0.06em] ${timerClass} ${styles.text}`}>{minutes}:{seconds}</div>
 
-          <button type="button" data-testid="floating-toggle" className="flex h-9 w-9 items-center justify-center rounded-full text-white shadow-[0_10px_20px_rgba(15,23,42,0.18)]" style={{ backgroundColor: palette.accent }} onClick={toggleTimer}>
+          <button type="button" data-testid="floating-toggle" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white shadow-[0_10px_20px_rgba(15,23,42,0.18)]" style={{ backgroundColor: palette.accent }} onClick={toggleTimer}>
             {isActive ? <Pause size={16} /> : <Play size={16} className="translate-x-px" />}
           </button>
 
           <button
             type="button"
-            data-testid="floating-skip-hold"
-            className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-white/70 bg-white/70"
-            onMouseDown={holdSkip.start}
-            onMouseUp={holdSkip.cancel}
-            onMouseLeave={holdSkip.cancel}
-            onTouchStart={holdSkip.start}
-            onTouchEnd={holdSkip.cancel}
-            onTouchCancel={holdSkip.cancel}
+            data-testid="floating-mini-menu"
+            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border ${styles.button}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              setMenu((current) => current ? null : { x: window.innerWidth - 150, y: 46 });
+            }}
           >
-            <div className="absolute inset-0" style={{ background: buildHoldRing(holdSkip.progress, palette.accent) }} />
-            <div className="absolute inset-[3px] rounded-full bg-white/92" />
-            <FastForward size={13} className="relative z-10" style={{ color: palette.accent }} />
-          </button>
-
-          <button type="button" data-testid="floating-standard-switch" className={`flex h-9 w-9 items-center justify-center rounded-full border ${styles.button}`} onClick={() => switchMode('standard')}>
-            <PanelTop size={14} />
+            <MoreHorizontal size={14} />
           </button>
 
           <button
@@ -409,7 +407,42 @@ const FloatingPomodoro = () => {
         </div>
 
         {menu && (
-          <div className={`absolute z-50 min-w-[132px] rounded-2xl border p-1.5 shadow-2xl ${palette.menu}`} style={menuPosition(menu, 140, 74)} onClick={(event) => event.stopPropagation()}>
+          <div className={`absolute z-50 min-w-[164px] rounded-2xl border p-1.5 shadow-2xl ${palette.menu}`} style={menuPosition(menu, 172, 146)} onClick={(event) => event.stopPropagation()}>
+            <button
+              type="button"
+              data-testid="floating-menu-toggle"
+              className="flex w-full items-center rounded-xl px-3 py-2 text-left text-[11px] font-medium text-slate-700 transition hover:bg-slate-100"
+              onClick={() => {
+                setMenu(null);
+                toggleTimer();
+              }}
+            >
+              {miniToggleLabel}
+            </button>
+            <button
+              type="button"
+              data-testid="floating-menu-skip"
+              className="flex w-full items-center rounded-xl px-3 py-2 text-left text-[11px] font-medium text-slate-700 transition hover:bg-slate-100"
+              onMouseDown={holdSkip.start}
+              onMouseUp={holdSkip.cancel}
+              onMouseLeave={holdSkip.cancel}
+              onTouchStart={holdSkip.start}
+              onTouchEnd={holdSkip.cancel}
+              onTouchCancel={holdSkip.cancel}
+            >
+              {copy.labels.holdSkip}
+            </button>
+            <button
+              type="button"
+              data-testid="floating-menu-reset"
+              className="flex w-full items-center rounded-xl px-3 py-2 text-left text-[11px] font-medium text-slate-700 transition hover:bg-slate-100"
+              onClick={() => {
+                setMenu(null);
+                resetTimer();
+              }}
+            >
+              {resetLabel}
+            </button>
             <button type="button" data-testid="floating-menu-standard" className="flex w-full items-center rounded-xl px-3 py-2 text-left text-[11px] font-medium text-slate-700 transition hover:bg-slate-100" onClick={() => { setMenu(null); switchMode('standard'); }}>
               {copy.menu.switchStandard}
             </button>
@@ -431,7 +464,7 @@ const FloatingPomodoro = () => {
       onClick={() => setMenu(null)}
       onContextMenu={openMenu}
     >
-      <div data-testid="floating-frame" className="h-full w-full border px-3 py-2 shadow-[0_18px_40px_rgba(15,23,42,0.12)]" style={{ background: palette.standard, borderColor: palette.border }}>
+      <div data-testid="floating-frame" className="h-full w-full border px-4 py-3 shadow-[0_18px_40px_rgba(15,23,42,0.12)]" style={{ background: palette.standard, borderColor: palette.border }}>
         <div data-testid="floating-drag-handle" className="flex cursor-grab items-start justify-between gap-2 active:cursor-grabbing" onMouseDown={() => appWindow?.startDragging().catch(() => undefined)}>
           <div className="min-w-0">
             <div className={`text-[9px] font-semibold uppercase tracking-[0.24em] ${styles.subtle}`}>{modeLabel}</div>
@@ -442,9 +475,20 @@ const FloatingPomodoro = () => {
           </button>
         </div>
 
-        <div data-testid="floating-timer" className={`mt-2 text-center font-black leading-none tracking-[-0.08em] ${timerClass} ${styles.text}`}>{minutes}:{seconds}</div>
+        <div data-testid="floating-timer" className={`mt-3 text-center font-black leading-none tracking-[-0.08em] ${timerClass} ${styles.text}`}>{minutes}:{seconds}</div>
 
-        <div className="mt-2 grid grid-cols-4 gap-2">
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <div className="rounded-[16px] border border-white/70 bg-white/60 px-3 py-2">
+            <div className={`text-[10px] font-semibold uppercase tracking-[0.22em] ${styles.subtle}`}>{taskLabel}</div>
+            <div className={`mt-1 truncate text-sm font-semibold ${styles.text}`}>{displayTaskName}</div>
+          </div>
+          <div className="rounded-[16px] border border-white/70 bg-white/60 px-3 py-2">
+            <div className={`text-[10px] font-semibold uppercase tracking-[0.22em] ${styles.subtle}`}>{rhythmLabel}</div>
+            <div className={`mt-1 text-sm font-semibold ${styles.text}`}>{copy.labels.holdSkip}</div>
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-4 gap-2">
           <button type="button" className={`flex h-9 items-center justify-center rounded-[14px] border ${styles.button}`} onClick={resetTimer}><RotateCcw size={16} /></button>
           <button type="button" data-testid="floating-toggle" className="flex h-9 items-center justify-center rounded-[14px] text-white shadow-[0_10px_20px_rgba(15,23,42,0.18)]" style={{ backgroundColor: palette.accent }} onClick={toggleTimer}>{isActive ? <Pause size={18} /> : <Play size={18} className="translate-x-px" />}</button>
           <button
@@ -465,7 +509,7 @@ const FloatingPomodoro = () => {
           <button type="button" data-testid="floating-mini-switch" className={`flex h-9 items-center justify-center rounded-[14px] border ${styles.button}`} onClick={() => switchMode('mini')}><PanelTop size={14} /></button>
         </div>
 
-        <div className="mt-2 text-center text-[10px] font-medium" style={{ color: palette.accent }}>{copy.labels.holdSkip}</div>
+        <div className="mt-3 rounded-[16px] border border-white/70 bg-white/55 px-3 py-2 text-center text-[11px] font-medium" style={{ color: palette.accent }}>{copy.labels.holdSkip}</div>
       </div>
 
       {menu && (

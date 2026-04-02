@@ -16,7 +16,7 @@ import { useAppStore } from '../stores/useAppStore';
 import { PlannerList, Task, TaskPriority, TaskStatus, WeeklyGoal } from '../types';
 import { getPlannerWeek, getPlannerWeekYear } from '../utils/week';
 import { Button } from './ui/button';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { Input } from './ui/input';
 import './CalendarView.css';
 
@@ -359,6 +359,9 @@ const CalendarView = () => {
         <DialogContent className="max-h-[90vh] w-[min(92vw,860px)] max-w-[860px] overflow-hidden rounded-[28px] border-slate-200 bg-white p-0">
           <DialogHeader className="px-6 pt-6">
             <DialogTitle className="text-2xl font-black text-slate-900">{draft.id ? t('calendar.editTask') : t('calendar.createTask')}</DialogTitle>
+            <DialogDescription className="sr-only">
+              {draft.id ? t('calendar.editTask') : t('calendar.createTask')} - {t('calendar.taskNotes')}
+            </DialogDescription>
           </DialogHeader>
           <div className="grid max-h-[calc(90vh-132px)] gap-4 overflow-y-auto px-6 py-2">
             <Input

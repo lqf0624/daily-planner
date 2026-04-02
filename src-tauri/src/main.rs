@@ -198,17 +198,32 @@ fn next_mode_after_skip(mode: &str, sessions_completed: u32, settings: &Pomodoro
   }
 }
 
-fn format_tray_text(mode: &str, time_left: u32, current_task: Option<&str>, tick_count: u64) -> String {
+fn truncate_for_tray(task: &str, max_chars: usize) -> String {
+  let truncated = task.chars().take(max_chars).collect::<String>();
+  if task.chars().count() > max_chars {
+    format!("{}…", truncated)
+  } else {
+    truncated
+  }
+}
+
+fn format_tray_text(mode: &str, time_left: u32, current_task: Option<&str>) -> String {
   let mode_str = if mode == "work" { "专注" } else { "休息" };
   let time_str = format!("{:02}:{:02}", time_left / 60, time_left % 60);
 
+  #[cfg(target_os = "macos")]
+  {
+    if let Some(task) = current_task {
+      if !task.is_empty() && mode == "work" {
+        return format!("{} {}", truncate_for_tray(task, 10), time_str);
+      }
+    }
+    return format!("{} {}", mode_str, time_str);
+  }
+
   if let Some(task) = current_task {
     if !task.is_empty() && mode == "work" {
-      if tick_count % 10 < 5 {
-        format!("{}: {}", mode_str, time_str)
-      } else {
-        format!("任务: {}", task)
-      }
+      format!("任务: {} | {}: {}", task, mode_str, time_str)
     } else {
       format!("{}: {}", mode_str, time_str)
     }
@@ -217,20 +232,33 @@ fn format_tray_text(mode: &str, time_left: u32, current_task: Option<&str>, tick
   }
 }
 
+fn format_tray_tooltip(mode: &str, time_left: u32, current_task: Option<&str>) -> String {
+  let mode_str = if mode == "work" { "专注" } else { "休息" };
+  let time_str = format!("{:02}:{:02}", time_left / 60, time_left % 60);
+
+  if let Some(task) = current_task {
+    if !task.is_empty() && mode == "work" {
+      return format!("任务: {} | {}: {}", task, mode_str, time_str);
+    }
+  }
+
+  format!("{}: {}", mode_str, time_str)
+}
+
 fn floating_window_spec(mode: &str) -> (&'static str, f64, f64, bool) {
   if mode == "mini" {
-    ("/?view=floating&mode=mini", 268.0, 64.0, true)
+    ("/?view=floating&mode=mini", 232.0, 56.0, true)
   } else {
-    ("/?view=floating", 300.0, 184.0, true)
+    ("/?view=floating", 312.0, 208.0, true)
   }
 }
 
 fn preferred_floating_size(mode: &str, width: Option<f64>, height: Option<f64>) -> (f64, f64) {
   let (_, default_width, default_height, _) = floating_window_spec(mode);
   let (min_width, min_height, max_width, max_height) = if mode == "mini" {
-    (220.0, 56.0, 420.0, 132.0)
+    (208.0, 56.0, 320.0, 120.0)
   } else {
-    (280.0, 168.0, 560.0, 360.0)
+    (292.0, 188.0, 560.0, 360.0)
   };
 
   (
@@ -585,11 +613,8 @@ fn main() {
       tauri::async_runtime::spawn(async move {
         let mut interval = interval(Duration::from_secs(1));
         let mut last_mode = String::new();
-        let mut tick_count = 0u64;
-
         loop {
           interval.tick().await;
-          tick_count += 1;
           let mut s = state_ptr_timer.lock().unwrap();
           let today = Local::now().format("%Y-%m-%d").to_string();
           if s.last_date != today {
@@ -642,10 +667,14 @@ fn main() {
           }
 
           if let Some(tray) = handle.tray_by_id("main") {
-            let tray_text = format_tray_text(&s.mode, s.time_left, s.current_task.as_deref(), tick_count);
+            let tray_tooltip = format_tray_tooltip(&s.mode, s.time_left, s.current_task.as_deref());
             
-            #[cfg(target_os = "macos")] let _ = tray.set_title(Some(tray_text.clone()));
-            let _ = tray.set_tooltip(Some(tray_text));
+            #[cfg(target_os = "macos")]
+            {
+              let tray_text = format_tray_text(&s.mode, s.time_left, s.current_task.as_deref());
+              let _ = tray.set_title(Some(tray_text));
+            }
+            let _ = tray.set_tooltip(Some(tray_tooltip));
 
             if s.mode != last_mode {
               if let Some(icon) = if s.mode == "work" { icon_work.clone() } else { icon_rest.clone() } {
@@ -672,7 +701,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-  use super::{extract_utf16_json_after_key, format_tray_text, next_mode_after_skip, PomodoroSettings};
+  use super::{extract_utf16_json_after_key, format_tray_text, format_tray_tooltip, next_mode_after_skip, truncate_for_tray, PomodoroSettings};
 
   #[test]
   fn skip_mode_moves_work_session_into_short_break_by_default() {
@@ -691,14 +720,27 @@ mod tests {
   }
 
   #[test]
-  fn tray_text_cycles_between_timer_and_task_name() {
-    let timer_text = format_tray_text("work", 25 * 60, Some("深度工作"), 2);
-    let task_text = format_tray_text("work", 25 * 60, Some("深度工作"), 7);
-    let break_text = format_tray_text("shortBreak", 5 * 60, Some("深度工作"), 7);
+  fn tray_text_prefers_task_when_available() {
+    let work_text = format_tray_text("work", 25 * 60, Some("深度工作"));
+    let break_text = format_tray_text("shortBreak", 5 * 60, Some("深度工作"));
 
-    assert_eq!(timer_text, "专注: 25:00");
-    assert_eq!(task_text, "任务: 深度工作");
+    assert_eq!(work_text, "任务: 深度工作 | 专注: 25:00");
     assert_eq!(break_text, "休息: 05:00");
+  }
+
+  #[test]
+  fn tray_tooltip_keeps_full_task_and_timer() {
+    let tooltip = format_tray_tooltip("work", 25 * 60, Some("完成季度复盘初稿"));
+    let break_tooltip = format_tray_tooltip("shortBreak", 5 * 60, Some("完成季度复盘初稿"));
+
+    assert_eq!(tooltip, "任务: 完成季度复盘初稿 | 专注: 25:00");
+    assert_eq!(break_tooltip, "休息: 05:00");
+  }
+
+  #[test]
+  fn tray_truncation_adds_ellipsis_for_long_titles() {
+    assert_eq!(truncate_for_tray("完成季度复盘初稿并整理发布说明", 10), "完成季度复盘初稿并整…");
+    assert_eq!(truncate_for_tray("短任务", 10), "短任务");
   }
 
   #[test]
