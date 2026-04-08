@@ -5,9 +5,10 @@ import { invoke } from '@tauri-apps/api/core';
 import SettingsDialog from './components/Settings';
 import { Button } from './components/ui/button';
 import { getWorkflowCopy } from './content/workflowCopy';
+import { FeedbackProvider } from './contexts/FeedbackContext';
 import { useI18n } from './i18n';
 import { useAppStore } from './stores/useAppStore';
-import { getOngoingTask } from './utils/taskActivity';
+import { getOngoingTask, getPlanningState } from './utils/taskActivity';
 import { cn } from './utils/cn';
 import { isTauriRuntime } from './utils/runtime';
 import FloatingPomodoro from './views/FloatingPomodoro';
@@ -21,6 +22,13 @@ const ReviewWorkspace = lazy(() => import('./components/ReviewWorkspace'));
 
 const LEGACY_IMPORT_MARKER = 'daily-planner-legacy-imported-daily-planner-ai-v1';
 const GUIDE_MARKER = 'daily-planner-guide-v2-seen';
+const todayDate = () => format(new Date(), 'yyyy-MM-dd');
+const fallbackReviewDate = (task: { plannedForDate?: string; scheduledStart?: string; dueAt?: string; updatedAt: string }) => (
+  task.plannedForDate
+  || task.scheduledStart?.slice(0, 10)
+  || task.dueAt?.slice(0, 10)
+  || task.updatedAt.slice(0, 10)
+);
 
 const App = () => {
   const { locale, t } = useI18n();
@@ -31,7 +39,24 @@ const App = () => {
   const weeklyReportsCount = useAppStore((state) => state.weeklyReports.length);
   const habitsCount = useAppStore((state) => state.habits.length);
   const chatHistoryCount = useAppStore((state) => state.chatHistory.length);
+  const today = todayDate();
   const inboxCount = useAppStore((state) => state.tasks.filter((task) => task.status === 'todo' && task.planningState === 'inbox').length);
+  const todayCount = useAppStore((state) => state.tasks.filter((task) => (
+    task.status === 'todo'
+    && getPlanningState(task) === 'today'
+    && (!task.plannedForDate || task.plannedForDate === today)
+  )).length);
+  const reviewMissedDatesCount = useAppStore((state) => Array.from(new Set(
+    state.tasks
+      .filter((task) => task.status === 'todo' && getPlanningState(task) === 'today')
+      .map((task) => fallbackReviewDate(task))
+      .filter((date) => date !== today),
+  )).length);
+  const hasTodayShutdown = useAppStore((state) => state.tasks.some((task) => (
+    task.status === 'todo'
+    && getPlanningState(task) === 'today'
+    && fallbackReviewDate(task) === today
+  )));
   const activeTaskTitle = useAppStore((state) => {
     const currentTask = state.currentTaskId ? state.tasks.find((task) => task.id === state.currentTaskId) : null;
     return currentTask?.title || getOngoingTask(state.tasks, new Date())?.title || null;
@@ -53,10 +78,16 @@ const App = () => {
   }, []);
 
   const navItems = useMemo(() => ([
-    { id: 'inbox', label: copy.app.nav.inbox, icon: Inbox },
-    { id: 'today', label: copy.app.nav.today, icon: Target },
-    { id: 'review', label: copy.app.nav.review, icon: ClipboardCheck },
-  ]), [copy.app.nav.inbox, copy.app.nav.review, copy.app.nav.today]);
+    { id: 'inbox', label: copy.app.nav.inbox, icon: Inbox, badge: inboxCount > 0 ? String(inboxCount) : null },
+    { id: 'today', label: copy.app.nav.today, icon: Target, badge: todayCount > 0 ? String(todayCount) : null },
+    {
+      id: 'review',
+      label: copy.app.nav.review,
+      icon: ClipboardCheck,
+      badge: reviewMissedDatesCount > 0 ? String(reviewMissedDatesCount) : null,
+      dot: reviewMissedDatesCount === 0 && hasTodayShutdown,
+    },
+  ]), [copy.app.nav.inbox, copy.app.nav.review, copy.app.nav.today, hasTodayShutdown, inboxCount, reviewMissedDatesCount, todayCount]);
 
   useEffect(() => {
     if (view !== 'main') return;
@@ -182,7 +213,8 @@ const App = () => {
   }[activeTab];
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[#f3f5f8] text-slate-900">
+    <FeedbackProvider>
+      <div className="flex h-screen w-screen overflow-hidden bg-[#f3f5f8] text-slate-900">
       <aside className="flex w-[260px] shrink-0 flex-col border-r border-slate-200 bg-white/90 p-5 backdrop-blur">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -216,6 +248,24 @@ const App = () => {
             >
               <item.icon size={18} />
               <span className="font-semibold">{item.label}</span>
+              {item.badge && (
+                <span
+                  className={cn(
+                    'ml-auto inline-flex min-w-[1.75rem] items-center justify-center rounded-full px-2 py-1 text-xs font-bold tabular-nums',
+                    activeTab === item.id ? 'bg-white/16 text-white' : 'bg-slate-100 text-slate-600',
+                  )}
+                >
+                  {item.badge}
+                </span>
+              )}
+              {!item.badge && item.dot && (
+                <span
+                  className={cn(
+                    'ml-auto h-2.5 w-2.5 rounded-full',
+                    activeTab === item.id ? 'bg-white' : 'bg-slate-400',
+                  )}
+                />
+              )}
             </button>
           ))}
         </nav>
@@ -249,19 +299,20 @@ const App = () => {
       </main>
 
       <SettingsDialog isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
-      <GettingStartedDialog
-        open={isGuideOpen}
-        onClose={() => {
-          setIsGuideOpen(false);
-          if (typeof localStorage !== 'undefined') localStorage.setItem(GUIDE_MARKER, '1');
-        }}
-        onJump={(tab) => {
-          setActiveTab(tab);
-          setIsGuideOpen(false);
-          if (typeof localStorage !== 'undefined') localStorage.setItem(GUIDE_MARKER, '1');
-        }}
-      />
-    </div>
+        <GettingStartedDialog
+          open={isGuideOpen}
+          onClose={() => {
+            setIsGuideOpen(false);
+            if (typeof localStorage !== 'undefined') localStorage.setItem(GUIDE_MARKER, '1');
+          }}
+          onJump={(tab) => {
+            setActiveTab(tab);
+            setIsGuideOpen(false);
+            if (typeof localStorage !== 'undefined') localStorage.setItem(GUIDE_MARKER, '1');
+          }}
+        />
+      </div>
+    </FeedbackProvider>
   );
 };
 

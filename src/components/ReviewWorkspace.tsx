@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { format } from 'date-fns';
 import { BookCheck, History, Sparkles, Target } from 'lucide-react';
+import { getReviewStateCopy } from '../content/reviewStateCopy';
 import { getWorkflowCopy } from '../content/workflowCopy';
+import { useFeedback } from '../contexts/FeedbackContext';
 import { useI18n } from '../i18n';
 import { applyActionPreview } from '../services/aiActions';
 import { useAppStore } from '../stores/useAppStore';
@@ -30,28 +32,20 @@ const getPendingReviewDate = (task: Task) => {
 
 const nowIso = () => new Date().toISOString();
 
-const getDateScopedReviewLabels = (locale: string, selectedReviewDate: string, today: string, completedToday: string, needShutdown: string) => {
+const getDateScopedReviewLabels = (
+  reviewStateCopy: ReturnType<typeof getReviewStateCopy>,
+  selectedReviewDate: string,
+  today: string,
+  completedToday: string,
+  needShutdown: string,
+) => {
   if (selectedReviewDate === today) {
     return { completedLabel: completedToday, shutdownLabel: needShutdown };
   }
 
-  if (locale === 'zh-CN') {
-    return {
-      completedLabel: `${selectedReviewDate} 已完成`,
-      shutdownLabel: `${selectedReviewDate} 待收尾`,
-    };
-  }
-
-  if (locale === 'de') {
-    return {
-      completedLabel: `Erledigt am ${selectedReviewDate}`,
-      shutdownLabel: `Offen am ${selectedReviewDate}`,
-    };
-  }
-
   return {
-    completedLabel: `Completed on ${selectedReviewDate}`,
-    shutdownLabel: `Open on ${selectedReviewDate}`,
+    completedLabel: reviewStateCopy.labels.completedForDate(selectedReviewDate, completedToday),
+    shutdownLabel: reviewStateCopy.labels.openForDate(selectedReviewDate, needShutdown),
   };
 };
 
@@ -59,12 +53,14 @@ const ReviewWorkspace = () => {
   const { locale } = useI18n();
   const workflowCopy = getWorkflowCopy(locale);
   const copy = workflowCopy.review;
+  const reviewStateCopy = getReviewStateCopy(locale);
   const tasks = useAppStore((state) => state.tasks);
   const goals = useAppStore((state) => state.goals);
   const updateTask = useAppStore((state) => state.updateTask);
   const setTaskPlanningState = useAppStore((state) => state.setTaskPlanningState);
   const reviewHistoryDates = useAppStore((state) => state.reviewHistoryDates);
   const rememberReviewDate = useAppStore((state) => state.rememberReviewDate);
+  const { showFeedback } = useFeedback();
 
   const today = format(new Date(), 'yyyy-MM-dd');
   const [selectedReviewDate, setSelectedReviewDate] = useState(today);
@@ -107,9 +103,39 @@ const ReviewWorkspace = () => {
   );
   const activeGoals = useMemo(() => goals.filter((goal) => !goal.isCompleted).slice(0, 3), [goals]);
   const { completedLabel, shutdownLabel } = useMemo(
-    () => getDateScopedReviewLabels(locale, selectedReviewDate, today, copy.completedToday, copy.needShutdown),
-    [copy.completedToday, copy.needShutdown, locale, selectedReviewDate, today],
+    () => getDateScopedReviewLabels(reviewStateCopy, selectedReviewDate, today, copy.completedToday, copy.needShutdown),
+    [copy.completedToday, copy.needShutdown, reviewStateCopy, selectedReviewDate, today],
   );
+
+  const completeTask = (task: Task) => {
+    const previous = { status: task.status, completedAt: task.completedAt };
+    updateTask(task.id, { status: 'done', completedAt: task.completedAt || nowIso() });
+    showFeedback({
+      message: reviewStateCopy.feedback.completed(task.title),
+      undoLabel: reviewStateCopy.undo,
+      onUndo: () => updateTask(task.id, previous),
+    });
+  };
+
+  const moveTaskToLater = (task: Task) => {
+    const previous = { planningState: task.planningState, plannedForDate: task.plannedForDate, isHighlight: task.isHighlight };
+    setTaskPlanningState(task.id, 'later');
+    showFeedback({
+      message: reviewStateCopy.feedback.movedToLater(task.title),
+      undoLabel: reviewStateCopy.undo,
+      onUndo: () => updateTask(task.id, previous),
+    });
+  };
+
+  const dropTask = (task: Task) => {
+    const previous = { status: task.status, reviewStatus: task.reviewStatus, isHighlight: task.isHighlight };
+    updateTask(task.id, { status: 'archived', reviewStatus: 'dropped', isHighlight: false });
+    showFeedback({
+      message: reviewStateCopy.feedback.dropped(task.title),
+      undoLabel: reviewStateCopy.undo,
+      onUndo: () => updateTask(task.id, previous),
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -117,10 +143,8 @@ const ReviewWorkspace = () => {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">{copy.eyebrow}</p>
-            <h2 className="mt-2 text-3xl font-black tracking-tight text-slate-900">{copy.title}</h2>
-            <p className="mt-2 text-sm text-slate-500">
-              {copy.description}
-            </p>
+      message: reviewStateCopy.feedback.dropped(task.title),
+      undoLabel: reviewStateCopy.undo,
           </div>
           <div className="grid min-w-[260px] grid-cols-2 gap-3">
             <div className="rounded-2xl bg-slate-50 p-4">
@@ -142,31 +166,27 @@ const ReviewWorkspace = () => {
               <BookCheck size={18} className="text-rose-600" />
               {copy.shutdownTitle}
             </div>
-            <p className="text-sm text-slate-600">
-              {copy.shutdownDescription}
-            </p>
+            <p className="text-sm text-slate-600">{copy.shutdownDescription}</p>
             <div className="mt-4 space-y-3">
-              {dailyCommitments.length === 0 && (
-                <div className="rounded-2xl bg-white/80 p-4 text-sm text-slate-500">
-                  <div>{copy.shutdownEmpty}</div>
-                </div>
-              )}
+              {dailyCommitments.length === 0 ? (
+                <div className="rounded-2xl bg-white/80 p-4 text-sm text-slate-500">{copy.shutdownEmpty}</div>
+              ) : null}
               {dailyCommitments.map((task) => (
                 <div key={task.id} className="rounded-[24px] border border-white/80 bg-white/80 p-4 backdrop-blur">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="font-semibold text-slate-900">{task.title}</div>
                       <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
-                        {task.isHighlight && <span className="rounded-full bg-white px-2 py-1">{copy.highlightBadge}</span>}
-                        {task.estimatedMinutes && <span className="rounded-full bg-white px-2 py-1">{copy.estimateMinutes(task.estimatedMinutes)}</span>}
-                        {task.taskType && <span className="rounded-full bg-white px-2 py-1">{copy.taskTypeLabels[task.taskType]}</span>}
+                        {task.isHighlight ? <span className="rounded-full bg-white px-2 py-1">{copy.highlightBadge}</span> : null}
+                        {task.estimatedMinutes ? <span className="rounded-full bg-white px-2 py-1">{copy.estimateMinutes(task.estimatedMinutes)}</span> : null}
+                        {task.taskType ? <span className="rounded-full bg-white px-2 py-1">{copy.taskTypeLabels[task.taskType]}</span> : null}
                       </div>
                     </div>
                     <div className="flex gap-2">
                       <Button
                         data-testid={`review-done-${task.id}`}
                         className="rounded-2xl bg-rose-600 text-white hover:bg-rose-700"
-                        onClick={() => updateTask(task.id, { status: 'done', completedAt: task.completedAt || nowIso() })}
+                        onClick={() => completeTask(task)}
                       >
                         {copy.done}
                       </Button>
@@ -174,7 +194,7 @@ const ReviewWorkspace = () => {
                         data-testid={`review-later-${task.id}`}
                         variant="outline"
                         className="rounded-2xl"
-                        onClick={() => setTaskPlanningState(task.id, 'later')}
+                        onClick={() => moveTaskToLater(task)}
                       >
                         {copy.later}
                       </Button>
@@ -182,7 +202,7 @@ const ReviewWorkspace = () => {
                         data-testid={`review-drop-${task.id}`}
                         variant="outline"
                         className="rounded-2xl text-rose-600 hover:bg-rose-50"
-                        onClick={() => updateTask(task.id, { status: 'archived', reviewStatus: 'dropped', isHighlight: false })}
+                        onClick={() => dropTask(task)}
                       >
                         {copy.drop}
                       </Button>
@@ -229,9 +249,9 @@ const ReviewWorkspace = () => {
               <div className="mt-2 font-semibold text-slate-900">{selectedReviewDate}</div>
             </div>
             <div className="mt-4 max-h-[280px] space-y-2 overflow-y-auto pr-1">
-              {reviewableDates.length === 0 && (
+              {reviewableDates.length === 0 ? (
                 <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">{copy.pendingReviewDatesEmpty}</div>
-              )}
+              ) : null}
               {reviewableDates.map((entry) => {
                 const active = entry.date === selectedReviewDate;
                 return (
@@ -306,9 +326,9 @@ const ReviewWorkspace = () => {
               {copy.activeGoals}
             </div>
             <div className="mt-4 space-y-3">
-              {activeGoals.length === 0 && (
+              {activeGoals.length === 0 ? (
                 <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">{copy.noActiveGoals}</div>
-              )}
+              ) : null}
               {activeGoals.map((goal) => (
                 <div key={goal.id} className="rounded-2xl bg-slate-50 p-4">
                   <div className="font-semibold text-slate-800">{goal.title}</div>

@@ -1,9 +1,11 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { addHours, format, parseISO } from 'date-fns';
 import { invoke } from '@tauri-apps/api/core';
-import { ArrowRight, Coffee, Flame, Monitor, Pause, Play, RotateCcw, Sparkles, Timer } from 'lucide-react';
+import { ArrowRight, CheckCircle2, ChevronDown, Coffee, Flame, Monitor, Pause, Play, RotateCcw, Sparkles, Timer } from 'lucide-react';
 import { getFocusCompanionCopy } from '../content/focusCompanionCopy';
+import { getTodayStateCopy } from '../content/todayStateCopy';
 import { getWorkflowCopy } from '../content/workflowCopy';
+import { useFeedback } from '../contexts/FeedbackContext';
 import { usePomodoro } from '../contexts/PomodoroContext';
 import { useI18n } from '../i18n';
 import { applyActionPreview } from '../services/aiActions';
@@ -26,6 +28,14 @@ type TaskAction = {
   variant?: 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link';
   className?: string;
 };
+
+type TaskActionModel = {
+  primary: TaskAction;
+  secondary?: TaskAction;
+  menu?: TaskAction[];
+};
+
+type TodayPageMode = 'needs_planning' | 'planned_idle' | 'focus_active' | 'ready_for_review';
 
 const toDateTimeInputValue = (value?: string) => (value ? format(parseISO(value), "yyyy-MM-dd'T'HH:mm") : '');
 const normalizeDateTimeInput = (value: string) => (value ? `${value}:00` : undefined);
@@ -58,46 +68,84 @@ const inferBrowserPlatform = () => {
 
 const TaskChip = ({
   task,
-  actions,
+  actionModel,
   copy,
+  moreLabel,
   tone = 'default',
 }: {
   task: Task;
-  actions: TaskAction[];
+  actionModel: TaskActionModel;
   copy: ReturnType<typeof getWorkflowCopy>['today'];
+  moreLabel: string;
   tone?: 'default' | 'muted';
-}) => (
-  <div className={`rounded-[24px] border p-4 ${tone === 'muted' ? 'border-slate-200/80 bg-white' : 'border-slate-200 bg-slate-50/80'}`}>
-    <div className="flex items-start justify-between gap-3">
-      <div className="min-w-0">
-        <div className={`font-semibold ${tone === 'muted' ? 'text-slate-800' : 'text-slate-900'}`}>{task.title}</div>
-        <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
-          {task.estimatedMinutes && <span className="rounded-full bg-white px-2 py-1">{copy.estimateMinutes(task.estimatedMinutes)}</span>}
-          {task.taskType && <span className="rounded-full bg-white px-2 py-1">{copy.taskTypeLabels[task.taskType]}</span>}
-          {(task.scheduledStart || task.dueAt) && <span className="rounded-full bg-white px-2 py-1">{getTaskDateLabel(task)}</span>}
+}) => {
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  return (
+    <div className={`rounded-[24px] border p-4 ${tone === 'muted' ? 'border-slate-200/80 bg-white' : 'border-slate-200 bg-slate-50/80'}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className={`font-semibold ${tone === 'muted' ? 'text-slate-800' : 'text-slate-900'}`}>{task.title}</div>
+          <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
+            {task.estimatedMinutes ? <span className="rounded-full bg-white px-2 py-1">{copy.estimateMinutes(task.estimatedMinutes)}</span> : null}
+            {task.taskType ? <span className="rounded-full bg-white px-2 py-1">{copy.taskTypeLabels[task.taskType]}</span> : null}
+            {(task.scheduledStart || task.dueAt) ? <span className="rounded-full bg-white px-2 py-1">{getTaskDateLabel(task)}</span> : null}
+          </div>
+        </div>
+        <div className="relative flex shrink-0 flex-wrap justify-end gap-2">
+          <Button
+            variant={actionModel.primary.variant ?? 'default'}
+            className={actionModel.primary.className ?? 'rounded-2xl'}
+            onClick={actionModel.primary.onClick}
+          >
+            {actionModel.primary.label}
+          </Button>
+          {actionModel.secondary ? (
+            <Button
+              variant={actionModel.secondary.variant ?? 'outline'}
+              className={actionModel.secondary.className ?? 'rounded-2xl'}
+              onClick={actionModel.secondary.onClick}
+            >
+              {actionModel.secondary.label}
+            </Button>
+          ) : null}
+          {actionModel.menu?.length ? (
+            <>
+              <Button variant="ghost" className="rounded-2xl px-3 text-slate-500" onClick={() => setMenuOpen((open) => !open)}>
+                {moreLabel}
+                <ChevronDown size={14} className="ml-1" />
+              </Button>
+              {menuOpen ? (
+                <div className="absolute right-0 top-12 z-20 min-w-[170px] rounded-2xl border border-slate-200 bg-white p-2 shadow-lg">
+                  {actionModel.menu.map((action) => (
+                    <button
+                      key={action.label}
+                      type="button"
+                      className="flex w-full items-center rounded-xl px-3 py-2 text-left text-sm font-medium text-slate-600 transition hover:bg-slate-50"
+                      onClick={() => {
+                        action.onClick();
+                        setMenuOpen(false);
+                      }}
+                    >
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </>
+          ) : null}
         </div>
       </div>
-      <div className="flex shrink-0 flex-wrap justify-end gap-2">
-        {actions.map((action) => (
-          <Button
-            key={action.label}
-            variant={action.variant ?? 'outline'}
-            className={action.className ?? 'rounded-2xl'}
-            onClick={action.onClick}
-          >
-            {action.label}
-          </Button>
-        ))}
-      </div>
     </div>
-  </div>
-);
+  );
+};
 
 const TodayWorkspace = () => {
   const { locale, t } = useI18n();
   const workflowCopy = getWorkflowCopy(locale);
   const copy = workflowCopy.today;
   const focusCopy = getFocusCompanionCopy(locale);
+  const todayStateCopy = getTodayStateCopy(locale);
   const tasks = useAppStore((state) => state.tasks);
   const goals = useAppStore((state) => state.goals);
   const currentTaskId = useAppStore((state) => state.currentTaskId);
@@ -108,6 +156,7 @@ const TodayWorkspace = () => {
   const updateTask = useAppStore((state) => state.updateTask);
   const deleteTask = useAppStore((state) => state.deleteTask);
   const { timeLeft, isActive, mode, pomodoroSettings, updatePomodoroSettings, toggleTimer, resetTimer, currentTaskName } = usePomodoro();
+  const { showFeedback } = useFeedback();
   const [view, setView] = useState<'plan' | 'calendar'>('plan');
   const [todayAssistantMode, setTodayAssistantMode] = useState<'plan' | 'focus'>('plan');
   const [scheduleTask, setScheduleTask] = useState<Task | null>(null);
@@ -154,6 +203,52 @@ const TodayWorkspace = () => {
   const focusStatus = mode === 'work'
     ? (isActive ? focusCopy.statusFocusing(pomodoroSettings.workDuration) : focusCopy.statusIdle)
     : focusCopy.statusBreak(recoveryMinutes);
+  function startFocus(taskId: string) {
+    setCurrentTaskId(taskId);
+    if (!isActive) toggleTimer();
+  }
+  const pageMode: TodayPageMode = useMemo(() => {
+    if (isActive && currentTaskId) return 'focus_active';
+    if (todayTasks.length === 0 && completedToday > 0) return 'ready_for_review';
+    if (!highlightTask) return 'needs_planning';
+    return 'planned_idle';
+  }, [completedToday, currentTaskId, highlightTask, isActive, todayTasks.length]);
+  const pageModeCopy = (() => {
+    switch (pageMode) {
+      case 'focus_active':
+        return {
+          ...todayStateCopy.modes.focusActive(activeFocusTaskTitle, focusCopy.pause),
+          primaryAction: toggleTimer,
+          secondaryAction: () => setView('calendar'),
+          icon: Timer,
+        };
+      case 'ready_for_review':
+        return {
+          ...todayStateCopy.modes.readyForReview,
+          primaryAction: () => {
+            document.querySelector<HTMLButtonElement>('[data-testid="nav-review"]')?.click();
+          },
+          secondaryAction: () => setView('calendar'),
+          icon: CheckCircle2,
+        };
+      case 'planned_idle':
+        return {
+          ...todayStateCopy.modes.plannedIdle(highlightTask?.title || copy.noHighlightChosen, copy.startFocus),
+          primaryAction: () => {
+            if (highlightTask) startFocus(highlightTask.id);
+          },
+          secondaryAction: () => setView('calendar'),
+          icon: Flame,
+        };
+      default:
+        return {
+          ...todayStateCopy.modes.needsPlanning(copy.aiPlanTitle),
+          primaryAction: () => setTodayAssistantMode('plan'),
+          secondaryAction: () => setView('calendar'),
+          icon: Sparkles,
+        };
+    }
+  })();
 
   const applyRhythmPreset = (focusMinutes: 15 | 30 | 60 | 90) => {
     const preset = getFocusRhythmPreset(focusMinutes);
@@ -198,11 +293,6 @@ const TodayWorkspace = () => {
     setScheduleTask(null);
   };
 
-  const startFocus = (taskId: string) => {
-    setCurrentTaskId(taskId);
-    if (!isActive) toggleTimer();
-  };
-
   const buildFocusAction = (taskId: string): TaskAction => {
     if (currentTaskId === taskId) {
       return {
@@ -220,9 +310,43 @@ const TodayWorkspace = () => {
   };
 
   const completeTask = (task: Task) => {
+    const nextDone = task.status !== 'done';
+    const previous = { status: task.status, completedAt: task.completedAt };
     updateTask(task.id, {
-      status: task.status === 'done' ? 'todo' : 'done',
-      completedAt: task.status === 'done' ? undefined : new Date().toISOString(),
+      status: nextDone ? 'done' : 'todo',
+      completedAt: nextDone ? new Date().toISOString() : undefined,
+    });
+    showFeedback({
+      message: nextDone ? todayStateCopy.feedback.completed(task.title) : todayStateCopy.feedback.restored(task.title),
+      undoLabel: todayStateCopy.undo,
+      onUndo: () => updateTask(task.id, previous),
+    });
+  };
+  const moveTaskToLater = (task: Task) => {
+    const previous = { planningState: task.planningState, plannedForDate: task.plannedForDate, isHighlight: task.isHighlight };
+    setTaskPlanningState(task.id, 'later');
+    showFeedback({
+      message: todayStateCopy.feedback.movedToLater(task.title),
+      undoLabel: todayStateCopy.undo,
+      onUndo: () => updateTask(task.id, previous),
+    });
+  };
+  const setAsHighlight = (task: Task) => {
+    const snapshots = todayTasks.map((item) => ({ id: item.id, planningState: item.planningState, plannedForDate: item.plannedForDate, isHighlight: item.isHighlight }));
+    promoteTaskToHighlight(task.id);
+    showFeedback({
+      message: todayStateCopy.feedback.setAsHighlight(task.title),
+      undoLabel: todayStateCopy.undo,
+      onUndo: () => snapshots.forEach((snapshot) => updateTask(snapshot.id, snapshot)),
+    });
+  };
+  const addToSupport = (task: Task) => {
+    const previous = { planningState: task.planningState, plannedForDate: task.plannedForDate, isHighlight: task.isHighlight };
+    promoteTaskToSupport(task.id);
+    showFeedback({
+      message: todayStateCopy.feedback.addedToSupport(task.title),
+      undoLabel: todayStateCopy.undo,
+      onUndo: () => updateTask(task.id, previous),
     });
   };
 
@@ -336,9 +460,12 @@ const TodayWorkspace = () => {
           <section className="rounded-[32px] border border-emerald-200/80 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.18),_transparent_42%),linear-gradient(180deg,_rgba(236,253,245,0.95),_rgba(255,255,255,1))] p-6 shadow-sm">
             <div className="mb-4 flex items-center justify-between">
               <div>
-                <div className="text-xs font-semibold uppercase tracking-[0.28em] text-emerald-700">{copy.highlight}</div>
-                <h3 className="mt-2 text-2xl font-black tracking-tight text-slate-900">{copy.highlightTitle}</h3>
-                <p className="mt-2 text-sm text-slate-600">{copy.highlightDescription}</p>
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.28em] text-emerald-700">
+                  <pageModeCopy.icon size={14} />
+                  {pageModeCopy.eyebrow}
+                </div>
+                <h3 className="mt-2 text-2xl font-black tracking-tight text-slate-900">{pageModeCopy.title}</h3>
+                <p className="mt-2 text-sm text-slate-600">{pageModeCopy.description}</p>
               </div>
               <div className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-slate-600">
                 {copy.doneCount(completedToday)}
@@ -357,11 +484,11 @@ const TodayWorkspace = () => {
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <Button data-testid="today-highlight-start" className="rounded-2xl bg-emerald-600 px-5 text-white hover:bg-emerald-700" onClick={() => startFocus(highlightTask.id)}>
-                      {currentTaskId === highlightTask.id && isActive ? <Pause size={16} className="mr-2" /> : <ArrowRight size={16} className="mr-2" />}
-                      {currentTaskId === highlightTask.id && isActive ? focusCopy.pause : copy.startFocus}
+                    <Button data-testid="today-highlight-start" className="rounded-2xl bg-emerald-600 px-5 text-white hover:bg-emerald-700" onClick={pageModeCopy.primaryAction}>
+                      {pageMode === 'focus_active' ? <Pause size={16} className="mr-2" /> : <ArrowRight size={16} className="mr-2" />}
+                      {pageModeCopy.primaryLabel}
                     </Button>
-                    <Button data-testid="today-highlight-schedule" variant="outline" className="rounded-2xl border-emerald-200 bg-white/80" onClick={() => openScheduleDialog(highlightTask)}>{copy.taskChip.schedule}</Button>
+                    <Button data-testid="today-highlight-schedule" variant="outline" className="rounded-2xl border-emerald-200 bg-white/80" onClick={pageModeCopy.secondaryAction}>{pageModeCopy.secondaryLabel}</Button>
                     <Button data-testid="today-highlight-complete" variant="outline" className="rounded-2xl" onClick={() => completeTask(highlightTask)}>
                       {highlightTask.status === 'done' ? copy.restore : copy.done}
                     </Button>
@@ -395,12 +522,15 @@ const TodayWorkspace = () => {
                   key={task.id}
                   task={task}
                   copy={copy}
-                  actions={[
-                    buildFocusAction(task.id),
-                    { label: copy.taskChip.highlight, onClick: () => promoteTaskToHighlight(task.id) },
-                    { label: copy.taskChip.schedule, onClick: () => openScheduleDialog(task) },
-                    { label: copy.taskChip.later, onClick: () => setTaskPlanningState(task.id, 'later') },
-                  ]}
+                  moreLabel={todayStateCopy.menuMore}
+                  actionModel={{
+                    primary: buildFocusAction(task.id),
+                    secondary: { label: copy.taskChip.highlight, onClick: () => setAsHighlight(task) },
+                    menu: [
+                      { label: copy.taskChip.schedule, onClick: () => openScheduleDialog(task) },
+                      { label: copy.taskChip.later, onClick: () => moveTaskToLater(task) },
+                    ],
+                  }}
                 />
               ))}
             </div>
@@ -420,14 +550,17 @@ const TodayWorkspace = () => {
                   key={task.id}
                   task={task}
                   copy={copy}
+                  moreLabel={todayStateCopy.menuMore}
                   tone="muted"
-                  actions={[
-                    { label: copy.taskChip.support, onClick: () => promoteTaskToSupport(task.id), variant: 'default' },
-                    { label: copy.taskChip.highlight, onClick: () => promoteTaskToHighlight(task.id) },
-                    { label: copy.taskChip.schedule, onClick: () => openScheduleDialog(task) },
-                    { label: copy.taskChip.later, onClick: () => setTaskPlanningState(task.id, 'later') },
-                    { ...buildFocusAction(task.id), variant: currentTaskId === task.id ? 'default' : 'ghost' },
-                  ]}
+                  actionModel={{
+                    primary: { label: copy.taskChip.support, onClick: () => addToSupport(task), variant: 'default' },
+                    secondary: buildFocusAction(task.id),
+                    menu: [
+                      { label: copy.taskChip.highlight, onClick: () => setAsHighlight(task) },
+                      { label: copy.taskChip.schedule, onClick: () => openScheduleDialog(task) },
+                      { label: copy.taskChip.later, onClick: () => moveTaskToLater(task) },
+                    ],
+                  }}
                 />
               ))}
             </div>
@@ -447,14 +580,17 @@ const TodayWorkspace = () => {
                   key={task.id}
                   task={task}
                   copy={copy}
+                  moreLabel={todayStateCopy.menuMore}
                   tone="muted"
-                  actions={[
-                    { label: copy.taskChip.support, onClick: () => promoteTaskToSupport(task.id), variant: 'default' },
-                    { label: copy.taskChip.highlight, onClick: () => promoteTaskToHighlight(task.id), variant: 'secondary' },
-                    { label: copy.taskChip.schedule, onClick: () => openScheduleDialog(task) },
-                    { ...buildFocusAction(task.id), variant: currentTaskId === task.id ? 'default' : 'ghost' },
-                    { label: copy.taskChip.delete, onClick: () => deleteTask(task.id), variant: 'destructive', className: 'rounded-2xl' },
-                  ]}
+                  actionModel={{
+                    primary: { label: copy.taskChip.support, onClick: () => addToSupport(task), variant: 'default' },
+                    secondary: buildFocusAction(task.id),
+                    menu: [
+                      { label: copy.taskChip.highlight, onClick: () => setAsHighlight(task) },
+                      { label: copy.taskChip.schedule, onClick: () => openScheduleDialog(task) },
+                      { label: copy.taskChip.delete, onClick: () => deleteTask(task.id), variant: 'destructive' },
+                    ],
+                  }}
                 />
               ))}
             </div>
@@ -520,8 +656,8 @@ const TodayWorkspace = () => {
                         onClick={() => applyRhythmPreset(preset.focusMinutes)}
                       >
                         {focusCopy.presetLabel(preset)}
-                        {isRecommended ? ` · ${focusCopy.recommendedBadge}` : ''}
-                        {isActivePreset ? ` · ${focusCopy.activePreset}` : ''}
+                        {isRecommended ? ` 路 ${focusCopy.recommendedBadge}` : ''}
+                        {isActivePreset ? ` 路 ${focusCopy.activePreset}` : ''}
                       </Button>
                     );
                   })}
