@@ -195,6 +195,16 @@ const readLegacyNativeStoreValue = async (name: string) => {
   }
 };
 
+const readLegacyWebViewStoreValue = async () => {
+  if (!isTauriRuntime()) return null;
+
+  try {
+    return await invoke<string | null>('load_legacy_daily_planner_ai_store');
+  } catch {
+    return null;
+  }
+};
+
 const todayDate = () => nowIso().slice(0, 10);
 
 const syncGoalWeeklyLinks = (goals: QuarterlyGoal[], weeklyPlans: WeeklyPlan[]) => {
@@ -235,9 +245,16 @@ const persistedStorage = createJSONStorage<PersistedAppState>(() => ({
       if (legacyNativeValue) {
         await store.set(name, legacyNativeValue);
         await store.save();
+        return legacyNativeValue;
       }
 
-      return legacyNativeValue;
+      const legacyWebViewValue = await readLegacyWebViewStoreValue();
+      if (legacyWebViewValue) {
+        await store.set(name, legacyWebViewValue);
+        await store.save();
+      }
+
+      return legacyWebViewValue;
     } catch {
       return readLocalStorageValue(name);
     }

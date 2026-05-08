@@ -269,10 +269,37 @@ fn preferred_floating_size(mode: &str, width: Option<f64>, height: Option<f64>) 
   )
 }
 
-fn legacy_daily_planner_ai_dir() -> Option<PathBuf> {
-  std::env::var_os("APPDATA")
-    .map(PathBuf::from)
-    .map(|path| path.join("daily-planner-ai").join("Local Storage").join("leveldb"))
+fn legacy_webview_local_storage_dirs() -> Vec<PathBuf> {
+  let mut paths = Vec::new();
+
+  if let Some(appdata) = std::env::var_os("APPDATA") {
+    paths.push(
+      PathBuf::from(appdata)
+        .join("daily-planner-ai")
+        .join("Local Storage")
+        .join("leveldb"),
+    );
+  }
+
+  if let Some(local_appdata) = std::env::var_os("LOCALAPPDATA") {
+    let base = PathBuf::from(local_appdata);
+    for identifier in [
+      "com.dailyplanner.app",
+      "com.dailyplanner.ai.v2",
+      "com.lqf0624.dailyplanner",
+    ] {
+      paths.push(
+        base
+          .join(identifier)
+          .join("EBWebView")
+          .join("Default")
+          .join("Local Storage")
+          .join("leveldb"),
+      );
+    }
+  }
+
+  paths
 }
 
 fn extract_utf16_json_after_key(bytes: &[u8], key: &str) -> Option<String> {
@@ -329,48 +356,60 @@ fn extract_utf16_json_after_key(bytes: &[u8], key: &str) -> Option<String> {
 }
 
 fn read_legacy_daily_planner_ai_store_json() -> Option<String> {
-  let dir = legacy_daily_planner_ai_dir()?;
-  if !dir.exists() {
-    return None;
-  }
+  let keys = [
+    "daily-planner-storage-v8",
+    "daily-planner-storage-v7",
+    "daily-planner-storage-v6",
+    "daily-planner-storage-v5",
+    "daily-planner-storage",
+    "zustand",
+  ];
 
-  let mut entries = fs::read_dir(dir)
-    .ok()?
-    .filter_map(|entry| entry.ok())
-    .filter(|entry| {
-      entry
-        .path()
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| matches!(ext, "log" | "ldb"))
-        .unwrap_or(false)
-    })
-    .collect::<Vec<_>>();
-
-  entries.sort_by_key(|entry| {
-    (
-      entry
-        .path()
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| if ext == "log" { 0 } else { 1 })
-        .unwrap_or(2),
-      std::cmp::Reverse(
-        entry
-          .metadata()
-          .and_then(|metadata| metadata.modified())
-          .ok(),
-      ),
-    )
-  });
-
-  for entry in entries {
-    let Ok(bytes) = fs::read(entry.path()) else {
+  for dir in legacy_webview_local_storage_dirs() {
+    if !dir.exists() {
       continue;
-    };
+    }
 
-    if let Some(json) = extract_utf16_json_after_key(&bytes, "daily-planner-storage-v5") {
-      return Some(json);
+    let mut entries = fs::read_dir(dir)
+      .ok()?
+      .filter_map(|entry| entry.ok())
+      .filter(|entry| {
+        entry
+          .path()
+          .extension()
+          .and_then(|ext| ext.to_str())
+          .map(|ext| matches!(ext, "log" | "ldb"))
+          .unwrap_or(false)
+      })
+      .collect::<Vec<_>>();
+
+    entries.sort_by_key(|entry| {
+      (
+        entry
+          .path()
+          .extension()
+          .and_then(|ext| ext.to_str())
+          .map(|ext| if ext == "log" { 0 } else { 1 })
+          .unwrap_or(2),
+        std::cmp::Reverse(
+          entry
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .ok(),
+        ),
+      )
+    });
+
+    for entry in entries {
+      let Ok(bytes) = fs::read(entry.path()) else {
+        continue;
+      };
+
+      for key in keys {
+        if let Some(json) = extract_utf16_json_after_key(&bytes, key) {
+          return Some(json);
+        }
+      }
     }
   }
 
