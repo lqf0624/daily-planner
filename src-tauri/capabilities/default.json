@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default permissions for the application",
-  "windows": ["main", "floating"],
+  "windows": ["main", "floating", "floating-settings"],
   "permissions": [
     "core:path:default",
     "core:event:default",

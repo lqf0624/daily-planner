@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Loader2, Send, Wand2 } from 'lucide-react';
+import { useFeedback } from '../contexts/FeedbackContext';
 import { useI18n } from '../i18n';
 import { sendMessageToAI } from '../services/aiService';
-import { AIActionPreview } from '../types';
 import { useAppStore } from '../stores/useAppStore';
+import { AIActionPreview, ChatMessage } from '../types';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 
@@ -28,12 +29,14 @@ const WorkflowSuggestionCard = ({
   testId,
   compact = false,
 }: WorkflowSuggestionCardProps) => {
-  const { t } = useI18n();
-  const { chatHistory, addChatMessage } = useAppStore();
+  const { locale, t } = useI18n();
+  const { showFeedback } = useFeedback();
+  const restoreData = useAppStore((state) => state.importData);
   const [input, setInput] = useState(initialValue);
   const [content, setContent] = useState('');
   const [preview, setPreview] = useState<AIActionPreview | undefined>();
   const [isLoading, setIsLoading] = useState(false);
+  const [localHistory, setLocalHistory] = useState<ChatMessage[]>([]);
 
   const handleSend = async () => {
     const text = input.trim();
@@ -41,23 +44,29 @@ const WorkflowSuggestionCard = ({
 
     const message = promptPrefix ? `${promptPrefix}\n\n${text}` : text;
     setIsLoading(true);
-    addChatMessage({ role: 'user', content: message, timestamp: Date.now() });
+    const nextUserMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: message, timestamp: Date.now() };
 
     try {
-      const result = await sendMessageToAI(message, chatHistory);
+      const result = await sendMessageToAI(message, localHistory);
       setContent(result.content);
       setPreview(result.actionPreview);
-      addChatMessage({
+      const assistantMessage: ChatMessage = {
+        id: crypto.randomUUID(),
         role: 'assistant',
         content: result.content,
         timestamp: Date.now(),
         actionPreview: result.actionPreview,
-      });
+      };
+      setLocalHistory((history) => [...history, nextUserMessage, assistantMessage]);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : t('ai.error');
       setContent(message);
       setPreview(undefined);
-      addChatMessage({ role: 'assistant', content: message, timestamp: Date.now() });
+      setLocalHistory((history) => [
+        ...history,
+        nextUserMessage,
+        { id: crypto.randomUUID(), role: 'assistant', content: message, timestamp: Date.now() },
+      ]);
     } finally {
       setIsLoading(false);
     }
@@ -104,7 +113,17 @@ const WorkflowSuggestionCard = ({
                 data-testid={testId ? `${testId}-apply` : undefined}
                 className={`rounded-2xl ${compact ? 'h-9 px-3 text-xs' : ''}`}
                 onClick={() => {
+                  const snapshot = useAppStore.getState();
                   onApplyPreview(preview);
+                  showFeedback({
+                    message: locale === 'zh-CN'
+                      ? '已应用 AI 建议，可在任务列表中查看变更。'
+                      : locale === 'de'
+                        ? 'KI-Vorschlag angewendet. Die Aenderungen sind in der Aufgabenliste sichtbar.'
+                        : 'AI suggestion applied. You can review the changes in the task list.',
+                    undoLabel: locale === 'zh-CN' ? '撤销' : locale === 'de' ? 'Rueckgaengig' : 'Undo',
+                    onUndo: () => restoreData(snapshot),
+                  });
                   setPreview(undefined);
                 }}
               >

@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
+import { invoke } from '@tauri-apps/api/core';
+import { load as loadTauriStore, type Store } from '@tauri-apps/plugin-store';
 import {
   AISettings,
   ChatMessage,
@@ -24,6 +26,7 @@ import {
   PersistedAppState,
   STORE_VERSION,
 } from './migrations.js';
+import { isTauriRuntime } from '../utils/runtime.js';
 
 type AppStoreState = {
   schemaVersion: number;
@@ -153,6 +156,45 @@ const legacyStorageKeys = [
   'zustand',
 ];
 
+const nativeStorePath = 'app-store.json';
+let nativeStorePromise: Promise<Store> | null = null;
+
+const getNativeStore = () => {
+  if (!isTauriRuntime()) return null;
+  nativeStorePromise ??= loadTauriStore(nativeStorePath, { defaults: {}, autoSave: 100 });
+  return nativeStorePromise;
+};
+
+const readLocalStorageValue = (name: string) => {
+  if (typeof localStorage === 'undefined') return null;
+  const current = localStorage.getItem(name);
+  if (current) return current;
+
+  for (const key of legacyStorageKeys) {
+    const value = localStorage.getItem(key);
+    if (value) return value;
+  }
+
+  for (const key of Object.keys(localStorage)) {
+    if (key.startsWith('daily-planner-storage')) {
+      const value = localStorage.getItem(key);
+      if (value) return value;
+    }
+  }
+
+  return null;
+};
+
+const readLegacyNativeStoreValue = async (name: string) => {
+  if (!isTauriRuntime()) return null;
+
+  try {
+    return await invoke<string | null>('load_legacy_native_store_value', { name });
+  } catch {
+    return null;
+  }
+};
+
 const todayDate = () => nowIso().slice(0, 10);
 
 const syncGoalWeeklyLinks = (goals: QuarterlyGoal[], weeklyPlans: WeeklyPlan[]) => {
@@ -173,32 +215,62 @@ const syncGoalWeeklyLinks = (goals: QuarterlyGoal[], weeklyPlans: WeeklyPlan[]) 
 };
 
 const persistedStorage = createJSONStorage<PersistedAppState>(() => ({
-  getItem: (name) => {
-    if (typeof localStorage === 'undefined') return null;
-    const current = localStorage.getItem(name);
-    if (current) return current;
+  getItem: async (name) => {
+    const nativeStore = getNativeStore();
+    if (!nativeStore) return readLocalStorageValue(name);
 
-    for (const key of legacyStorageKeys) {
-      const value = localStorage.getItem(key);
+    try {
+      const store = await nativeStore;
+      const value = await store.get<string>(name);
       if (value) return value;
-    }
 
-    for (const key of Object.keys(localStorage)) {
-      if (key.startsWith('daily-planner-storage')) {
-        const value = localStorage.getItem(key);
-        if (value) return value;
+      const localValue = readLocalStorageValue(name);
+      if (localValue) {
+        await store.set(name, localValue);
+        await store.save();
+        return localValue;
       }
+
+      const legacyNativeValue = await readLegacyNativeStoreValue(name);
+      if (legacyNativeValue) {
+        await store.set(name, legacyNativeValue);
+        await store.save();
+      }
+
+      return legacyNativeValue;
+    } catch {
+      return readLocalStorageValue(name);
+    }
+  },
+  setItem: async (name, value) => {
+    const nativeStore = getNativeStore();
+    if (!nativeStore) {
+      if (typeof localStorage !== 'undefined') localStorage.setItem(name, value);
+      return;
     }
 
-    return null;
+    try {
+      const store = await nativeStore;
+      await store.set(name, value);
+      await store.save();
+    } catch {
+      if (typeof localStorage !== 'undefined') localStorage.setItem(name, value);
+    }
   },
-  setItem: (name, value) => {
-    if (typeof localStorage === 'undefined') return;
-    localStorage.setItem(name, value);
-  },
-  removeItem: (name) => {
-    if (typeof localStorage === 'undefined') return;
-    localStorage.removeItem(name);
+  removeItem: async (name) => {
+    const nativeStore = getNativeStore();
+    if (!nativeStore) {
+      if (typeof localStorage !== 'undefined') localStorage.removeItem(name);
+      return;
+    }
+
+    try {
+      const store = await nativeStore;
+      await store.delete(name);
+      await store.save();
+    } catch {
+      if (typeof localStorage !== 'undefined') localStorage.removeItem(name);
+    }
   },
 }));
 

@@ -643,7 +643,7 @@ dependencies = [
 
 [[package]]
 name = "daily-planner"
-version = "0.3.5"
+version = "0.3.7"
 dependencies = [
  "chrono",
  "notify-rust",

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Inbox, Sparkles } from 'lucide-react';
+import { ArrowRight, Inbox, Sparkles } from 'lucide-react';
 import { getWorkflowCopy } from '../content/workflowCopy';
 import { useI18n } from '../i18n';
 import { applyActionPreview } from '../services/aiActions';
@@ -41,9 +41,52 @@ type InboxDraft = {
   notes?: string;
 };
 
+const getInboxLocalCopy = (locale: string) => {
+  if (locale === 'zh-CN') {
+    return {
+      notes: '\u5907\u6ce8',
+      triageTitle: '\u8fde\u7eed\u5206\u62e3',
+      triageDesc: '\u53ea\u5904\u7406\u5f53\u524d\u8fd9\u4e00\u6761\uff1a\u5148\u8865\u65f6\u957f\u548c\u7c7b\u578b\uff0c\u518d\u51b3\u5b9a\u653e\u5230\u4eca\u5929\u3001\u7a0d\u540e\u6216\u7ee7\u7eed\u7559\u5728\u6536\u4ef6\u7bb1\u3002',
+      currentItem: '\u5f53\u524d\u6761\u76ee',
+      nextItem: '\u4e0b\u4e00\u6761',
+      noItem: '\u6536\u4ef6\u7bb1\u5df2\u6e05\u7a7a\u3002',
+      quickDeep: '\u6df1\u5ea6',
+      quickShallow: '\u6d45\u5c42',
+      quickPersonal: '\u4e2a\u4eba',
+    };
+  }
+
+  if (locale === 'de') {
+    return {
+      notes: 'Notizen',
+      triageTitle: 'Fortlaufende Klärung',
+      triageDesc: 'Bearbeite nur den aktuellen Punkt: Dauer und Typ ergänzen, dann heute, später oder Inbox wählen.',
+      currentItem: 'Aktueller Punkt',
+      nextItem: 'Weiter',
+      noItem: 'Der Eingang ist leer.',
+      quickDeep: 'Tief',
+      quickShallow: 'Leicht',
+      quickPersonal: 'Persönlich',
+    };
+  }
+
+  return {
+    notes: 'Notes',
+    triageTitle: 'Continuous triage',
+    triageDesc: 'Handle one item at a time: add duration and type, then decide today, later, or keep it in inbox.',
+    currentItem: 'Current item',
+    nextItem: 'Next',
+    noItem: 'Inbox is clear.',
+    quickDeep: 'Deep',
+    quickShallow: 'Shallow',
+    quickPersonal: 'Personal',
+  };
+};
+
 const InboxWorkspace = () => {
   const { locale } = useI18n();
   const copy = getWorkflowCopy(locale);
+  const localCopy = getInboxLocalCopy(locale);
   const {
     tasks,
     addTask,
@@ -52,9 +95,15 @@ const InboxWorkspace = () => {
   } = useAppStore();
   const [draft, setDraft] = useState('');
   const [pendingEdits, setPendingEdits] = useState<Record<string, InboxDraft>>({});
+  const [expandedNotes, setExpandedNotes] = useState<Record<string, boolean>>({});
+  const [activeTriageIndex, setActiveTriageIndex] = useState(0);
 
   const inboxTasks = useMemo(() => tasks.filter(isInboxTask), [tasks]);
   const laterTasks = useMemo(() => tasks.filter(isLaterTask).slice(0, 6), [tasks]);
+  const activeTriageTask = inboxTasks.length
+    ? inboxTasks[Math.min(activeTriageIndex, inboxTasks.length - 1)]
+    : undefined;
+  const notesToggleLabel = localCopy.notes;
 
   const readDraft = (task: Task): InboxDraft => ({
     estimatedMinutes: pendingEdits[task.id]?.estimatedMinutes ?? task.estimatedMinutes,
@@ -111,11 +160,24 @@ const InboxWorkspace = () => {
     });
   };
 
+  const applyTriage = (task: Task, planningState: Task['planningState']) => {
+    applyDraft(task, planningState);
+    setActiveTriageIndex((current) => Math.min(current, Math.max(inboxTasks.length - 2, 0)));
+  };
+
+  const skipTriage = () => {
+    setActiveTriageIndex((current) => (inboxTasks.length ? (current + 1) % inboxTasks.length : 0));
+  };
+
   const handleCapture = () => {
     const title = draft.trim();
     if (!title) return;
     addTask(createInboxTask(title));
     setDraft('');
+  };
+
+  const toggleNotes = (taskId: string) => {
+    setExpandedNotes((current) => ({ ...current, [taskId]: !current[taskId] }));
   };
 
   return (
@@ -151,6 +213,86 @@ const InboxWorkspace = () => {
           </div>
         </section>
 
+        <section data-testid="inbox-triage-card" className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-black text-slate-900">{localCopy.triageTitle}</h3>
+              <p className="mt-1 text-sm text-slate-500">{localCopy.triageDesc}</p>
+            </div>
+            <Button
+              data-testid="inbox-triage-next"
+              type="button"
+              variant="outline"
+              className="rounded-2xl"
+              onClick={skipTriage}
+              disabled={!activeTriageTask}
+            >
+              {localCopy.nextItem}
+              <ArrowRight size={14} className="ml-2" />
+            </Button>
+          </div>
+
+          {!activeTriageTask ? (
+            <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-400">
+              {localCopy.noItem}
+            </div>
+          ) : (() => {
+            const taskDraft = readDraft(activeTriageTask);
+            return (
+              <div className="rounded-[24px] border border-slate-200 bg-slate-50/70 p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{localCopy.currentItem}</div>
+                <div className="mt-2 text-xl font-black text-slate-900">{activeTriageTask.title}</div>
+
+                <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_1fr_auto]">
+                  <div className="flex flex-wrap gap-2">
+                    {durationOptions.map((option) => (
+                      <button
+                        key={option}
+                        data-testid={`inbox-triage-estimate-${option}`}
+                        type="button"
+                        onClick={() => updateDraft(activeTriageTask.id, { estimatedMinutes: option })}
+                        className={`rounded-full px-3 py-2 text-xs font-bold transition ${
+                          taskDraft.estimatedMinutes === option ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        {copy.inbox.estimateMinutes(option)}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {typeOptions.map((option) => (
+                      <button
+                        key={option}
+                        data-testid={`inbox-triage-type-${option}`}
+                        type="button"
+                        onClick={() => updateDraft(activeTriageTask.id, { taskType: option })}
+                        className={`rounded-full px-3 py-2 text-xs font-bold transition ${
+                          taskDraft.taskType === option ? 'bg-primary text-white' : 'bg-white text-slate-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        {option === 'deep' ? localCopy.quickDeep : option === 'shallow' ? localCopy.quickShallow : localCopy.quickPersonal}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <Button data-testid="inbox-triage-today" className="rounded-2xl" onClick={() => applyTriage(activeTriageTask, 'today')}>
+                      {copy.inbox.moveToToday}
+                    </Button>
+                    <Button data-testid="inbox-triage-later" variant="outline" className="rounded-2xl" onClick={() => applyTriage(activeTriageTask, 'later')}>
+                      {copy.inbox.moveToLater}
+                    </Button>
+                    <Button data-testid="inbox-triage-keep" variant="ghost" className="rounded-2xl" onClick={() => applyTriage(activeTriageTask, 'inbox')}>
+                      {copy.inbox.keepInInbox}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+        </section>
+
         <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
           <div className="mb-4 flex items-center justify-between">
             <div>
@@ -165,7 +307,12 @@ const InboxWorkspace = () => {
                 <div>{copy.inbox.empty}</div>
               </div>
             )}
-            {inboxTasks.map((task) => (
+            {inboxTasks.map((task) => {
+              const taskDraft = readDraft(task);
+              const notesOpen = expandedNotes[task.id] || false;
+              const hasNotes = Boolean(taskDraft.notes?.trim());
+
+              return (
               <div key={task.id} className="rounded-[24px] border border-slate-200 bg-slate-50/70 p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1">
@@ -173,7 +320,7 @@ const InboxWorkspace = () => {
                     <div className="mt-3 grid gap-3 md:grid-cols-3">
                       <select
                         data-testid={`inbox-estimate-${task.id}`}
-                        value={readDraft(task).estimatedMinutes || ''}
+                        value={taskDraft.estimatedMinutes || ''}
                         onChange={(event) => updateDraft(task.id, { estimatedMinutes: event.target.value ? Number(event.target.value) as Task['estimatedMinutes'] : undefined })}
                         className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none"
                       >
@@ -184,7 +331,7 @@ const InboxWorkspace = () => {
                       </select>
                       <select
                         data-testid={`inbox-type-${task.id}`}
-                        value={readDraft(task).taskType || ''}
+                        value={taskDraft.taskType || ''}
                         onChange={(event) => updateDraft(task.id, { taskType: event.target.value as Task['taskType'] || undefined })}
                         className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none"
                       >
@@ -195,7 +342,7 @@ const InboxWorkspace = () => {
                       </select>
                       <select
                         data-testid={`inbox-state-${task.id}`}
-                        value={readDraft(task).planningState || 'inbox'}
+                        value={taskDraft.planningState || 'inbox'}
                         onChange={(event) => updateDraft(task.id, { planningState: event.target.value as Task['planningState'] })}
                         className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none"
                       >
@@ -204,18 +351,29 @@ const InboxWorkspace = () => {
                         <option value="later">{copy.inbox.moveToLater}</option>
                       </select>
                     </div>
-                    <textarea
-                      data-testid={`inbox-notes-${task.id}`}
-                      value={readDraft(task).notes}
-                      onChange={(event) => updateDraft(task.id, { notes: event.target.value })}
-                      className="mt-3 min-h-[88px] w-full rounded-2xl border border-slate-200 bg-white p-3 text-sm outline-none"
-                      placeholder={copy.inbox.notesPlaceholder}
-                    />
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <Button data-testid={`inbox-notes-toggle-${task.id}`} type="button" variant="ghost" className="h-9 rounded-2xl px-3 text-slate-500" onClick={() => toggleNotes(task.id)}>
+                        {notesToggleLabel}
+                        {hasNotes ? <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">1</span> : null}
+                      </Button>
+                      {!notesOpen && hasNotes ? (
+                        <span className="max-w-[420px] truncate text-xs text-slate-400">{taskDraft.notes}</span>
+                      ) : null}
+                    </div>
+                    {notesOpen ? (
+                      <textarea
+                        data-testid={`inbox-notes-${task.id}`}
+                        value={taskDraft.notes}
+                        onChange={(event) => updateDraft(task.id, { notes: event.target.value })}
+                        className="mt-3 min-h-[88px] w-full rounded-2xl border border-slate-200 bg-white p-3 text-sm outline-none"
+                        placeholder={copy.inbox.notesPlaceholder}
+                      />
+                    ) : null}
                   </div>
                   <div className="flex min-w-[180px] flex-col items-end gap-3">
                     <div className="flex flex-wrap items-center justify-end gap-2 text-xs">
                       <span className="rounded-full bg-white px-3 py-1 font-semibold text-slate-500">
-                        {copy.today.planningStateLabels[readDraft(task).planningState || 'inbox']}
+                        {copy.today.planningStateLabels[taskDraft.planningState || 'inbox']}
                       </span>
                       {isDraftDirty(task) && (
                         <span className="rounded-full bg-amber-50 px-3 py-1 font-semibold text-amber-700">
@@ -234,7 +392,8 @@ const InboxWorkspace = () => {
                   </div>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </section>
       </div>
@@ -255,7 +414,7 @@ const InboxWorkspace = () => {
             {copy.inbox.laterQueue}
           </div>
           <p className="mt-2 text-sm text-slate-500">{copy.inbox.laterQueueDescription}</p>
-          <div className="mt-4 space-y-3">
+          <div className="mt-4 max-h-[360px] space-y-3 overflow-y-auto pr-1">
             {laterTasks.length === 0 && (
               <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">{copy.inbox.laterQueueEmpty}</div>
             )}

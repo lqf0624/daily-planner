@@ -1,7 +1,7 @@
 {
   "productName": "daily-planner",
-  "version": "0.3.6",
-  "identifier": "com.dailyplanner.app",
+  "version": "0.3.7",
+  "identifier": "com.lqf0624.dailyplanner",
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",

@@ -264,7 +264,7 @@ const en: WorkflowCopy = {
     calendarHeaderDescription: 'Switch between the planning board and the calendar without leaving today.',
     planningBoard: 'Planning Board',
     calendar: 'Calendar',
-    headerEyebrow: '聚焦今日',
+    headerEyebrow: 'Make Time',
     headerDescription: 'Pick one highlight, support it with at most two tasks, then protect a real focus block.',
     committed: 'Committed',
     highlight: 'Highlight',
@@ -309,7 +309,7 @@ const en: WorkflowCopy = {
     scheduleSave: 'Apply schedule',
   },
   review: {
-    eyebrow: '复盘',
+    eyebrow: 'Reflect',
     title: 'Review',
     description: 'Close the day cleanly, review the week with context, and keep quarterly goals connected to execution.',
     completedToday: 'Completed today',

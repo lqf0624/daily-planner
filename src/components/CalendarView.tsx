@@ -9,11 +9,12 @@ import { DateSelectArg, DatesSetArg, EventClickArg, EventContentArg, EventDropAr
 import enLocale from '@fullcalendar/core/locales/en-gb';
 import deLocale from '@fullcalendar/core/locales/de';
 import zhLocale from '@fullcalendar/core/locales/zh-cn';
-import { ChevronLeft, ChevronRight, Filter, Flag, Plus, Search, Target } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { Check, ChevronLeft, ChevronRight, Filter, Flag, Plus, Search, Target } from 'lucide-react';
+import { addMinutes, format, parseISO } from 'date-fns';
 import { useI18n } from '../i18n';
 import { useAppStore } from '../stores/useAppStore';
 import { PlannerList, Task, TaskPriority, TaskStatus, WeeklyGoal } from '../types';
+import { getTaskDateLabel, isTodayTask } from '../utils/taskActivity';
 import { getPlannerWeek, getPlannerWeekYear } from '../utils/week';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
@@ -30,6 +31,55 @@ const priorityOptions: TaskPriority[] = ['high', 'medium', 'low'];
 const statusOptions: TaskStatus[] = ['todo', 'done'];
 
 type CalendarViewMode = 'timeGridDay' | 'timeGridWeek' | 'dayGridMonth' | 'listWeek';
+type CalendarLocalCopy = {
+  unscheduledTitle: string;
+  unscheduledDesc: string;
+  unscheduledEmpty: string;
+  schedule: string;
+  quickSchedule: string;
+  quickSlots: Record<'morning' | 'afternoon' | 'evening', string>;
+  estimateMinutes: (minutes: number) => string;
+  taskTypeLabels: Record<'deep' | 'shallow' | 'personal', string>;
+};
+
+const calendarLocalCopy: Record<string, CalendarLocalCopy> = {
+  'zh-CN': {
+    unscheduledTitle: '\u672a\u6392\u65f6\u95f4',
+    unscheduledDesc: '\u8fd9\u4e9b\u4eca\u65e5\u4efb\u52a1\u8fd8\u6ca1\u653e\u5230\u65f6\u95f4\u5757\u91cc\uff0c\u5148\u7ed9\u5b83\u4eec\u4e00\u4e2a\u5f00\u59cb\u548c\u7ed3\u675f\u65f6\u95f4\u3002',
+    unscheduledEmpty: '\u4eca\u65e5\u4efb\u52a1\u90fd\u5df2\u7ecf\u6709\u65f6\u95f4\u5b89\u6392\u3002',
+    schedule: '\u5b89\u6392\u65f6\u95f4',
+    quickSchedule: '\u5feb\u901f\u6392\u671f',
+    quickSlots: { morning: '\u4e0a\u5348', afternoon: '\u4e0b\u5348', evening: '\u665a\u4e0a' },
+    estimateMinutes: (minutes) => `${minutes} \u5206\u949f`,
+    taskTypeLabels: { deep: '\u6df1\u5ea6', shallow: '\u6d45\u5c42', personal: '\u4e2a\u4eba' },
+  },
+  en: {
+    unscheduledTitle: 'Unscheduled today',
+    unscheduledDesc: 'These today tasks are not in a time block yet. Give each one a start and end time.',
+    unscheduledEmpty: 'All today tasks have a time block.',
+    schedule: 'Schedule',
+    quickSchedule: 'Quick schedule',
+    quickSlots: { morning: 'Morning', afternoon: 'Afternoon', evening: 'Evening' },
+    estimateMinutes: (minutes) => `${minutes} min`,
+    taskTypeLabels: { deep: 'deep', shallow: 'shallow', personal: 'personal' },
+  },
+  de: {
+    unscheduledTitle: 'Heute ohne Zeitblock',
+    unscheduledDesc: 'Diese heutigen Aufgaben haben noch keinen Zeitblock. Lege Start- und Endzeit fest.',
+    unscheduledEmpty: 'Alle heutigen Aufgaben haben einen Zeitblock.',
+    schedule: 'Planen',
+    quickSchedule: 'Schnell planen',
+    quickSlots: { morning: 'Vormittag', afternoon: 'Nachmittag', evening: 'Abend' },
+    estimateMinutes: (minutes) => `${minutes} Min`,
+    taskTypeLabels: { deep: 'tief', shallow: 'leicht', personal: 'pers\u00f6nlich' },
+  },
+};
+
+const calendarQuickScheduleSlots = [
+  { key: 'morning', hour: 9 },
+  { key: 'afternoon', hour: 14 },
+  { key: 'evening', hour: 19 },
+] as const;
 
 const toLocalDateTime = (date: Date) => format(date, "yyyy-MM-dd'T'HH:mm:ss");
 const toDateTimeInputValue = (value?: string) => (value ? format(parseISO(value), "yyyy-MM-dd'T'HH:mm") : '');
@@ -106,6 +156,9 @@ const CalendarView = () => {
   };
 
   const fullCalendarLocale = locale === 'de' ? deLocale : locale === 'zh-CN' ? zhLocale : enLocale;
+  const copy = calendarLocalCopy[locale] || calendarLocalCopy.en;
+  const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
+  const listById = useMemo(() => new Map(lists.map((list) => [list.id, list])), [lists]);
 
   useEffect(() => {
     const calendar = calendarRef.current?.getApi();
@@ -130,10 +183,15 @@ const CalendarView = () => {
     return task.title.toLowerCase().includes(keyword) || (task.notes || '').toLowerCase().includes(keyword);
   }), [listFilter, query, tasks]);
 
+  const unscheduledTodayTasks = useMemo(() => filteredTasks
+    .filter((task) => task.status !== 'done' && isTodayTask(task) && !task.scheduledStart && !task.dueAt)
+    .slice(0, 12), [filteredTasks]);
+
   const events = useMemo<EventInput[]>(() => filteredTasks
     .filter((task) => task.scheduledStart || task.dueAt)
     .map((task) => {
-    const listColor = lists.find((list) => list.id === task.listId)?.color || '#2563eb';
+    const list = listById.get(task.listId);
+    const listColor = list?.color || '#2563eb';
     return {
       id: task.id,
       title: task.title,
@@ -147,10 +205,10 @@ const CalendarView = () => {
       extendedProps: {
         priority: task.priority,
         listColor,
-        listName: lists.find((list) => list.id === task.listId)?.name || 'Inbox',
+        listName: list?.name || 'Inbox',
       },
     };
-  }), [filteredTasks, lists]);
+  }), [filteredTasks, listById]);
 
   const selectedList = (id: string): PlannerList | undefined => lists.find((item) => item.id === id);
 
@@ -212,11 +270,26 @@ const CalendarView = () => {
     });
   };
 
+  const quickScheduleTask = (task: Task, hour: number) => {
+    const start = new Date();
+    start.setHours(hour, 0, 0, 0);
+    const end = addMinutes(start, task.estimatedMinutes || 60);
+
+    updateTask(task.id, {
+      scheduledStart: toLocalDateTime(start),
+      scheduledEnd: toLocalDateTime(end),
+      dueAt: toLocalDateTime(end),
+      planningState: 'today',
+      plannedForDate: format(start, 'yyyy-MM-dd'),
+      allDay: false,
+    });
+  };
+
   const renderEventContent = (arg: EventContentArg) => {
     const priority = arg.event.extendedProps.priority as TaskPriority;
     const listColor = arg.event.extendedProps.listColor as string;
     const listName = arg.event.extendedProps.listName as string;
-    const task = tasks.find((item) => item.id === arg.event.id);
+    const task = taskById.get(arg.event.id);
 
     return (
       <div className="flex min-w-0 items-center gap-2 overflow-hidden rounded-xl px-1 py-0.5">
@@ -236,7 +309,7 @@ const CalendarView = () => {
             });
           }}
         >
-          ✓
+          <Check size={12} strokeWidth={3} />
         </button>
         <span className={`h-2 w-2 shrink-0 rounded-full ${priority === 'high' ? 'bg-rose-500' : priority === 'medium' ? 'bg-amber-500' : 'bg-slate-400'}`} />
         <div className="min-w-0">
@@ -327,6 +400,50 @@ const CalendarView = () => {
         </div>
       </section>
 
+      <section data-testid="calendar-unscheduled-panel" className="rounded-[28px] border border-dashed border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-black text-slate-900">{copy.unscheduledTitle}</h3>
+            <p className="mt-1 text-sm text-slate-500">{copy.unscheduledDesc}</p>
+          </div>
+          <div className="rounded-2xl bg-slate-50 px-3 py-2 text-sm font-bold text-slate-600">{unscheduledTodayTasks.length}</div>
+        </div>
+        <div className="mt-4 max-h-[220px] space-y-3 overflow-y-auto pr-1">
+          {unscheduledTodayTasks.length === 0 ? (
+            <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">{copy.unscheduledEmpty}</div>
+          ) : unscheduledTodayTasks.map((task) => (
+            <div key={task.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-3">
+              <div className="min-w-0">
+                <div className="truncate font-semibold text-slate-900">{task.title}</div>
+                <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
+                  {task.estimatedMinutes ? <span className="rounded-full bg-white px-2 py-1">{copy.estimateMinutes(task.estimatedMinutes)}</span> : null}
+                  {task.taskType ? <span className="rounded-full bg-white px-2 py-1">{copy.taskTypeLabels[task.taskType]}</span> : null}
+                  {(task.scheduledStart || task.dueAt) ? <span className="rounded-full bg-white px-2 py-1">{getTaskDateLabel(task)}</span> : null}
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <span className="text-xs font-semibold text-slate-400">{copy.quickSchedule}</span>
+                {calendarQuickScheduleSlots.map((slot) => (
+                  <Button
+                    key={slot.key}
+                    data-testid={`calendar-unscheduled-quick-${slot.key}-${task.id}`}
+                    type="button"
+                    variant="outline"
+                    className="h-9 rounded-2xl px-3"
+                    onClick={() => quickScheduleTask(task, slot.hour)}
+                  >
+                    {copy.quickSlots[slot.key]}
+                  </Button>
+                ))}
+                <Button data-testid={`calendar-unscheduled-schedule-${task.id}`} variant="ghost" className="h-9 rounded-2xl px-3" onClick={() => openTaskDialog(task)}>
+                  {copy.schedule}
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
       <section className="calendar-shell min-h-0 flex-1 overflow-hidden rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm">
         <FullCalendar
           ref={calendarRef}
@@ -349,7 +466,7 @@ const CalendarView = () => {
           eventResize={(arg: EventResizeDoneArg) => updateCalendarTaskTime(arg.event.id, arg.event.start, arg.event.end, arg.event.allDay)}
           datesSet={(arg: DatesSetArg) => setCalendarTitle(arg.view.title)}
           eventClick={(arg: EventClickArg) => {
-            const task = tasks.find((item) => item.id === arg.event.id);
+            const task = taskById.get(arg.event.id);
             if (task) openTaskDialog(task);
           }}
         />

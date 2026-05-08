@@ -162,6 +162,21 @@ export const PomodoroProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     };
   }, [buildFallbackState, localSettings, syncCompletedSessions]);
 
+  useEffect(() => {
+    if (isTauriRuntime()) return undefined;
+
+    const timer = window.setInterval(() => {
+      setState((current) => {
+        if (!current?.is_active) return current;
+        if (current.time_left > 1) return { ...current, time_left: current.time_left - 1 };
+
+        return nextModeAfterSkip({ ...current, time_left: 0, is_active: false });
+      });
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [nextModeAfterSkip]);
+
   const updatePomodoroSettings = useCallback((settings: Partial<PomodoroSettings>) => {
     const merged = { ...useAppStore.getState().pomodoroSettings, ...settings };
     updateStoreSettings(settings);

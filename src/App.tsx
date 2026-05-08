@@ -8,7 +8,7 @@ import { getWorkflowCopy } from './content/workflowCopy';
 import { FeedbackProvider } from './contexts/FeedbackContext';
 import { useI18n } from './i18n';
 import { useAppStore } from './stores/useAppStore';
-import { getOngoingTask, getPlanningState } from './utils/taskActivity';
+import { getOngoingTask, getPlanningState, getTaskReviewDate } from './utils/taskActivity';
 import { cn } from './utils/cn';
 import { isTauriRuntime } from './utils/runtime';
 import FloatingPomodoro from './views/FloatingPomodoro';
@@ -23,12 +23,6 @@ const ReviewWorkspace = lazy(() => import('./components/ReviewWorkspace'));
 const LEGACY_IMPORT_MARKER = 'daily-planner-legacy-imported-daily-planner-ai-v1';
 const GUIDE_MARKER = 'daily-planner-guide-v2-seen';
 const todayDate = () => format(new Date(), 'yyyy-MM-dd');
-const fallbackReviewDate = (task: { plannedForDate?: string; scheduledStart?: string; dueAt?: string; updatedAt: string }) => (
-  task.plannedForDate
-  || task.scheduledStart?.slice(0, 10)
-  || task.dueAt?.slice(0, 10)
-  || task.updatedAt.slice(0, 10)
-);
 
 const App = () => {
   const { locale, t } = useI18n();
@@ -40,27 +34,45 @@ const App = () => {
   const habitsCount = useAppStore((state) => state.habits.length);
   const chatHistoryCount = useAppStore((state) => state.chatHistory.length);
   const today = todayDate();
-  const inboxCount = useAppStore((state) => state.tasks.filter((task) => task.status === 'todo' && task.planningState === 'inbox').length);
-  const todayCount = useAppStore((state) => state.tasks.filter((task) => (
-    task.status === 'todo'
-    && getPlanningState(task) === 'today'
-    && (!task.plannedForDate || task.plannedForDate === today)
-  )).length);
-  const reviewMissedDatesCount = useAppStore((state) => Array.from(new Set(
-    state.tasks
-      .filter((task) => task.status === 'todo' && getPlanningState(task) === 'today')
-      .map((task) => fallbackReviewDate(task))
-      .filter((date) => date !== today),
-  )).length);
-  const hasTodayShutdown = useAppStore((state) => state.tasks.some((task) => (
-    task.status === 'todo'
-    && getPlanningState(task) === 'today'
-    && fallbackReviewDate(task) === today
-  )));
-  const activeTaskTitle = useAppStore((state) => {
-    const currentTask = state.currentTaskId ? state.tasks.find((task) => task.id === state.currentTaskId) : null;
-    return currentTask?.title || getOngoingTask(state.tasks, new Date())?.title || null;
-  });
+  const tasks = useAppStore((state) => state.tasks);
+  const currentTaskId = useAppStore((state) => state.currentTaskId);
+  const workflowMetrics = useMemo(() => {
+    let inboxCount = 0;
+    let todayCount = 0;
+    let hasTodayShutdown = false;
+    const missedReviewDates = new Set<string>();
+    let currentTaskTitle: string | null = null;
+
+    for (const task of tasks) {
+      if (task.id === currentTaskId) currentTaskTitle = task.title;
+      if (task.status !== 'todo') continue;
+
+      const planningState = getPlanningState(task);
+      if (planningState === 'inbox') {
+        inboxCount += 1;
+        continue;
+      }
+
+      if (planningState !== 'today') continue;
+
+      const reviewDate = getTaskReviewDate(task);
+      if (reviewDate === today) {
+        hasTodayShutdown = true;
+        if (!task.plannedForDate || task.plannedForDate === today) todayCount += 1;
+      } else {
+        missedReviewDates.add(reviewDate);
+      }
+    }
+
+    return {
+      inboxCount,
+      todayCount,
+      reviewMissedDatesCount: missedReviewDates.size,
+      hasTodayShutdown,
+      activeTaskTitle: currentTaskTitle || getOngoingTask(tasks, new Date())?.title || null,
+    };
+  }, [currentTaskId, tasks, today]);
+  const { inboxCount, todayCount, reviewMissedDatesCount, hasTodayShutdown, activeTaskTitle } = workflowMetrics;
   const _hasHydrated = useAppStore((state) => state._hasHydrated);
   const setCurrentTaskId = useAppStore((state) => state.setCurrentTaskId);
   const isSettingsOpen = useAppStore((state) => state.isSettingsOpen);

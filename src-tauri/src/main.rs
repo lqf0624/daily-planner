@@ -198,6 +198,7 @@ fn next_mode_after_skip(mode: &str, sessions_completed: u32, settings: &Pomodoro
   }
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn truncate_for_tray(task: &str, max_chars: usize) -> String {
   let truncated = task.chars().take(max_chars).collect::<String>();
   if task.chars().count() > max_chars {
@@ -207,6 +208,7 @@ fn truncate_for_tray(task: &str, max_chars: usize) -> String {
   }
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn format_tray_text(mode: &str, time_left: u32, current_task: Option<&str>) -> String {
   let mode_str = if mode == "work" { "专注" } else { "休息" };
   let time_str = format!("{:02}:{:02}", time_left / 60, time_left % 60);
@@ -369,6 +371,45 @@ fn read_legacy_daily_planner_ai_store_json() -> Option<String> {
 
     if let Some(json) = extract_utf16_json_after_key(&bytes, "daily-planner-storage-v5") {
       return Some(json);
+    }
+  }
+
+  None
+}
+
+fn legacy_native_store_paths() -> Vec<PathBuf> {
+  #[cfg(target_os = "macos")]
+  {
+    let mut paths = Vec::new();
+    if let Some(home) = std::env::var_os("HOME") {
+      paths.push(
+        PathBuf::from(home)
+          .join("Library")
+          .join("Application Support")
+          .join("com.dailyplanner.app")
+          .join("app-store.json"),
+      );
+    }
+    paths
+  }
+
+  #[cfg(not(target_os = "macos"))]
+  {
+    Vec::new()
+  }
+}
+
+fn read_legacy_native_store_value(name: &str) -> Option<String> {
+  for path in legacy_native_store_paths() {
+    let Ok(content) = fs::read_to_string(path) else {
+      continue;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) else {
+      continue;
+    };
+
+    if let Some(text) = value.get(name).and_then(|item| item.as_str()) {
+      return Some(text.to_string());
     }
   }
 
@@ -559,6 +600,11 @@ fn load_legacy_daily_planner_ai_store() -> Option<String> {
   read_legacy_daily_planner_ai_store_json()
 }
 
+#[tauri::command]
+fn load_legacy_native_store_value(name: String) -> Option<String> {
+  read_legacy_native_store_value(&name)
+}
+
 fn main() {
   let app = tauri::Builder::default()
     .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -687,7 +733,7 @@ fn main() {
       });
       Ok(())
     })
-    .invoke_handler(tauri::generate_handler![get_pomodoro_state, toggle_timer, reset_timer, skip_mode, update_settings, open_main, show_notification, toggle_floating_window, open_floating_mode, open_floating_settings, get_runtime_platform, broadcast_floating_preferences, update_task_name, load_legacy_daily_planner_ai_store])
+    .invoke_handler(tauri::generate_handler![get_pomodoro_state, toggle_timer, reset_timer, skip_mode, update_settings, open_main, show_notification, toggle_floating_window, open_floating_mode, open_floating_settings, get_runtime_platform, broadcast_floating_preferences, update_task_name, load_legacy_daily_planner_ai_store, load_legacy_native_store_value])
     .build(tauri::generate_context!())
     .expect("error");
 

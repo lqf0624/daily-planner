@@ -10,6 +10,8 @@ type ReviewStateCopy = {
   labels: {
     completedForDate: (date: string, fallback: string) => string;
     openForDate: (date: string, fallback: string) => string;
+    completedListTitle: string;
+    completedListEmpty: string;
   };
 };
 
@@ -23,6 +25,8 @@ const zhCN: ReviewStateCopy = {
   labels: {
     completedForDate: (date, fallback) => (date ? `${date} \u5df2\u5b8c\u6210` : fallback),
     openForDate: (date, fallback) => (date ? `${date} \u5f85\u6536\u5c3e` : fallback),
+    completedListTitle: '\u5df2\u5b8c\u6210\u4e8b\u9879',
+    completedListEmpty: '\u8fd9\u4e00\u5929\u8fd8\u6ca1\u6709\u5b8c\u6210\u8bb0\u5f55\u3002',
   },
 };
 
@@ -36,6 +40,8 @@ const en: ReviewStateCopy = {
   labels: {
     completedForDate: (date, fallback) => (date ? `Completed on ${date}` : fallback),
     openForDate: (date, fallback) => (date ? `Open on ${date}` : fallback),
+    completedListTitle: 'Completed items',
+    completedListEmpty: 'No completed items recorded for this day yet.',
   },
 };
 
@@ -49,6 +55,8 @@ const de: ReviewStateCopy = {
   labels: {
     completedForDate: (date, fallback) => (date ? `Erledigt am ${date}` : fallback),
     openForDate: (date, fallback) => (date ? `Offen am ${date}` : fallback),
+    completedListTitle: 'Erledigte Aufgaben',
+    completedListEmpty: 'Fuer diesen Tag sind noch keine erledigten Aufgaben erfasst.',
   },
 };
 

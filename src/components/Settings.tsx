@@ -4,8 +4,10 @@ import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { readTextFile, writeTextFile } from '@tauri-apps/plugin-fs';
+import { useFeedback } from '../contexts/FeedbackContext';
 import { useI18n } from '../i18n';
 import { useAppStore } from '../stores/useAppStore';
+import { PlannerList } from '../types';
 import { checkForUpdates, RELEASES_URL, relaunchApp, supportsUpdater } from '../services/updater';
 import { isTauriRuntime } from '../utils/runtime';
 import { Button } from './ui/button';
@@ -40,9 +42,38 @@ const macUpdateCopy = {
   },
 } as const;
 
+const settingsFeedbackCopy = {
+  'zh-CN': {
+    imported: '备份已导入，正在刷新应用。',
+    importFailed: (message: string) => `导入失败：${message}`,
+    categoryDeleted: (name: string, count: number) => `已删除分类「${name}」，${count} 个任务已移回收件箱。`,
+    undo: '撤销',
+  },
+  en: {
+    imported: 'Backup imported. Refreshing the app.',
+    importFailed: (message: string) => `Import failed: ${message}`,
+    categoryDeleted: (name: string, count: number) => `Deleted "${name}". ${count} tasks moved back to Inbox.`,
+    undo: 'Undo',
+  },
+  de: {
+    imported: 'Backup importiert. Die App wird neu geladen.',
+    importFailed: (message: string) => `Import fehlgeschlagen: ${message}`,
+    categoryDeleted: (name: string, count: number) => `"${name}" geloescht. ${count} Aufgaben wurden in den Eingang verschoben.`,
+    undo: 'Rueckgaengig',
+  },
+} as const;
+
 const Settings = ({ isOpen, onClose }: SettingsProps) => {
   const { locale, t, preference, setPreference } = useI18n();
-  const { aiSettings, lists, updateAISettings, importData, addList, updateList, deleteList } = useAppStore();
+  const aiSettings = useAppStore((state) => state.aiSettings);
+  const lists = useAppStore((state) => state.lists);
+  const updateAISettings = useAppStore((state) => state.updateAISettings);
+  const importData = useAppStore((state) => state.importData);
+  const addList = useAppStore((state) => state.addList);
+  const updateList = useAppStore((state) => state.updateList);
+  const deleteList = useAppStore((state) => state.deleteList);
+  const updateTask = useAppStore((state) => state.updateTask);
+  const { showFeedback } = useFeedback();
   const [version, setVersion] = useState('0.0.0');
   const [listName, setListName] = useState('');
   const [listColor, setListColor] = useState('#2563eb');
@@ -50,11 +81,13 @@ const Settings = ({ isOpen, onClose }: SettingsProps) => {
   const [platform, setPlatform] = useState('unknown');
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [isInstallingUpdate, setIsInstallingUpdate] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
   const [availableUpdateVersion, setAvailableUpdateVersion] = useState<string | null>(null);
   const [updateNotes, setUpdateNotes] = useState<string | null>(null);
   const pendingUpdateRef = useRef<Awaited<ReturnType<typeof checkForUpdates>>>(null);
   const isMac = platform === 'macos';
   const macCopy = macUpdateCopy[locale];
+  const feedbackCopy = settingsFeedbackCopy[locale];
 
   useEffect(() => {
     setUpdateStatus(isMac ? macCopy.status : t('settings.update.idle'));
@@ -77,10 +110,21 @@ const Settings = ({ isOpen, onClose }: SettingsProps) => {
   };
 
   const handleImport = async () => {
-    const path = await open({ multiple: false, filters: [{ name: 'JSON', extensions: ['json'] }] });
-    if (!path || typeof path !== 'string') return;
-    importData(JSON.parse(await readTextFile(path)));
-    window.location.reload();
+    setIsImporting(true);
+    try {
+      const path = await open({ multiple: false, filters: [{ name: 'JSON', extensions: ['json'] }] });
+      if (!path || typeof path !== 'string') return;
+
+      const imported = JSON.parse(await readTextFile(path)) as Parameters<typeof importData>[0];
+      importData(imported);
+      showFeedback({ message: feedbackCopy.imported });
+      window.setTimeout(() => window.location.reload(), 700);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : t('ai.error');
+      showFeedback({ message: feedbackCopy.importFailed(message) });
+    } finally {
+      setIsImporting(false);
+    }
   };
 
   const handleAddList = () => {
@@ -88,6 +132,24 @@ const Settings = ({ isOpen, onClose }: SettingsProps) => {
     addList({ id: crypto.randomUUID(), name: listName.trim(), color: listColor });
     setListName('');
     setListColor('#2563eb');
+  };
+
+  const handleDeleteList = (list: PlannerList) => {
+    const affectedTaskIds = useAppStore
+      .getState()
+      .tasks
+      .filter((task) => task.listId === list.id)
+      .map((task) => task.id);
+
+    deleteList(list.id);
+    showFeedback({
+      message: feedbackCopy.categoryDeleted(list.name, affectedTaskIds.length),
+      undoLabel: feedbackCopy.undo,
+      onUndo: () => {
+        addList(list);
+        affectedTaskIds.forEach((taskId) => updateTask(taskId, { listId: list.id }));
+      },
+    });
   };
 
   const handleCheckUpdate = useCallback(async (silent = false) => {
@@ -189,7 +251,7 @@ const Settings = ({ isOpen, onClose }: SettingsProps) => {
                 <div key={list.id} className="flex items-center gap-3 rounded-2xl bg-white p-3">
                   <span className="h-3 w-3 rounded-full" style={{ backgroundColor: list.color }} />
                   <Input value={list.name} onChange={(event) => updateList(list.id, { name: event.target.value })} className="h-10 rounded-xl border-slate-200 bg-slate-50" />
-                  {list.id !== 'inbox' && <button type="button" className="rounded-xl p-2 text-rose-600 transition hover:bg-rose-50" onClick={() => deleteList(list.id)}><Trash2 size={16} /></button>}
+                  {list.id !== 'inbox' && <button type="button" className="rounded-xl p-2 text-rose-600 transition hover:bg-rose-50" onClick={() => handleDeleteList(list)}><Trash2 size={16} /></button>}
                 </div>
               ))}
             </div>
@@ -215,7 +277,7 @@ const Settings = ({ isOpen, onClose }: SettingsProps) => {
             </div>
             <div className="mt-6 grid gap-3">
               <Button variant="outline" className="justify-start rounded-2xl" onClick={handleExport}><Download size={16} className="mr-2" />{t('settings.export')}</Button>
-              <Button variant="outline" className="justify-start rounded-2xl" onClick={handleImport}><Upload size={16} className="mr-2" />{t('settings.import')}</Button>
+              <Button variant="outline" className="justify-start rounded-2xl" onClick={handleImport} disabled={isImporting}><Upload size={16} className="mr-2" />{t('settings.import')}</Button>
             </div>
             <div className="mt-6 rounded-2xl bg-white p-4 text-sm text-slate-500">{t('settings.version')} <span className="font-semibold text-slate-900">{version}</span></div>
             <div className="mt-4 rounded-2xl bg-white p-4 text-sm text-slate-500">

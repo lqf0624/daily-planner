@@ -53,6 +53,13 @@ export const isTodayTask = (task: Task, referenceDate = todayDate()) => (
 
 export const isLaterTask = (task: Task) => task.status === 'todo' && getPlanningState(task) === 'later';
 
+export const getTaskReviewDate = (task: Pick<Task, 'plannedForDate' | 'scheduledStart' | 'dueAt' | 'updatedAt'>) => (
+  task.plannedForDate
+  || task.scheduledStart?.slice(0, 10)
+  || task.dueAt?.slice(0, 10)
+  || task.updatedAt.slice(0, 10)
+);
+
 export const getTaskDisplayDate = (task: Task) => {
   const start = getTaskStart(task);
   if (start) return format(start, 'yyyy-MM-dd');

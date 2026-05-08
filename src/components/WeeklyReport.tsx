@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { addWeeks, getQuarter, subWeeks } from 'date-fns';
+import { addWeeks, getQuarter, parseISO, subWeeks } from 'date-fns';
 import { BarChart3, CheckCircle2, ChevronDown, Clock3, FileText, History, Save } from 'lucide-react';
 import { getReviewPanelsCopy } from '../content/reviewPanelsCopy';
 import { useI18n } from '../i18n';
@@ -12,15 +12,59 @@ import { Button } from './ui/button';
 type WeeklyReportDraft = Pick<WeeklyReportType, 'summary' | 'wins' | 'blockers' | 'adjustments'>;
 type WeekTarget = { weekNumber: number; year: number };
 type GroupedTargets = { year: number; quarters: Array<{ quarter: number; targets: WeekTarget[] }> };
+type ReportPanel = 'overview' | 'completed' | 'write';
 
 const emptyDraft: WeeklyReportDraft = { summary: '', wins: '', blockers: '', adjustments: '' };
 const toTargetKey = ({ weekNumber, year }: WeekTarget) => `${year}-W${weekNumber}`;
 const toQuarterKey = (year: number, quarter: number) => `${year}-Q${quarter}`;
 const hasPlanningDate = (scheduledStart?: string, dueAt?: string) => Boolean(scheduledStart || dueAt);
 
+const getPanelCopy = (locale: string) => {
+  if (locale === 'zh-CN') {
+    return {
+      overview: '\u6982\u89c8',
+      overviewTitle: '\u672c\u5468\u6982\u89c8',
+      overviewDesc: '\u5148\u770b\u7ed3\u679c\uff0c\u518d\u51b3\u5b9a\u8981\u4e0d\u8981\u8fdb\u5165\u5b8c\u6210\u9879\u6216\u5199\u590d\u76d8\u3002',
+      completed: '\u5b8c\u6210\u9879',
+      write: '\u5199\u590d\u76d8',
+      quickRead: '\u5feb\u901f\u5224\u65ad',
+      planState: '\u5468\u8ba1\u5212',
+      noDraft: '\u8fd8\u6ca1\u6709\u5199\u590d\u76d8\u5185\u5bb9\u3002',
+      hasDraft: '\u5df2\u6709\u590d\u76d8\u8349\u7a3f\u3002',
+    };
+  }
+
+  if (locale === 'de') {
+    return {
+      overview: 'Überblick',
+      overviewTitle: 'Wochenüberblick',
+      overviewDesc: 'Erst Ergebnis prüfen, dann bei Bedarf Aufgaben oder Text öffnen.',
+      completed: 'Erledigt',
+      write: 'Schreiben',
+      quickRead: 'Schnellcheck',
+      planState: 'Wochenplan',
+      noDraft: 'Noch kein Rückblicktext.',
+      hasDraft: 'Ein Rückblickentwurf ist vorhanden.',
+    };
+  }
+
+  return {
+    overview: 'Overview',
+    overviewTitle: 'Week overview',
+    overviewDesc: 'Check the outcome first, then open completed tasks or the writing form only when needed.',
+    completed: 'Done',
+    write: 'Write',
+    quickRead: 'Quick read',
+    planState: 'Weekly plan',
+    noDraft: 'No review draft yet.',
+    hasDraft: 'Review draft exists.',
+  };
+};
+
 const WeeklyReport = () => {
   const { locale, t, formatDate } = useI18n();
   const copy = getReviewPanelsCopy(locale).weeklyReport;
+  const panelCopy = getPanelCopy(locale);
   const { tasks, weeklyPlans, weeklyReports, addWeeklyReport, updateWeeklyReport, pomodoroHistory } = useAppStore();
   const defaultTarget = useMemo<WeekTarget>(() => {
     const defaultDate = subWeeks(new Date(), 1);
@@ -30,17 +74,35 @@ const WeeklyReport = () => {
   const [selectedTarget, setSelectedTarget] = useState<WeekTarget>(defaultTarget);
   const [draft, setDraft] = useState<WeeklyReportDraft>(emptyDraft);
   const [saveMessage, setSaveMessage] = useState('');
+  const [activePanel, setActivePanel] = useState<ReportPanel>('overview');
   const [expandedQuarters, setExpandedQuarters] = useState<Record<string, boolean>>({
     [toQuarterKey(defaultTarget.year, getQuarter(startOfPlannerWeek(subWeeks(new Date(), 1))))]: true,
   });
 
   const availableTargets = useMemo(() => {
     const map = new Map<string, WeekTarget>();
+    const currentTarget = { weekNumber: getPlannerWeek(new Date()), year: getPlannerWeekYear(new Date()) };
+    const addTargetForDate = (value?: string) => {
+      if (!value) return;
+      const parsed = parseISO(value);
+      if (!Number.isFinite(parsed.getTime())) return;
+      const target = { weekNumber: getPlannerWeek(parsed), year: getPlannerWeekYear(parsed) };
+      map.set(toTargetKey(target), target);
+    };
+
     map.set(toTargetKey(defaultTarget), defaultTarget);
+    map.set(toTargetKey(currentTarget), currentTarget);
     weeklyReports.forEach((report) => map.set(toTargetKey(report), { weekNumber: report.weekNumber, year: report.year }));
     weeklyPlans.forEach((plan) => map.set(toTargetKey(plan), { weekNumber: plan.weekNumber, year: plan.year }));
+    tasks.forEach((task) => {
+      addTargetForDate(task.completedAt);
+      addTargetForDate(task.scheduledStart);
+      addTargetForDate(task.dueAt);
+      addTargetForDate(task.plannedForDate);
+      addTargetForDate(task.createdAt);
+    });
     return Array.from(map.values()).sort((a, b) => (b.year - a.year) || (b.weekNumber - a.weekNumber));
-  }, [defaultTarget, weeklyPlans, weeklyReports]);
+  }, [defaultTarget, tasks, weeklyPlans, weeklyReports]);
 
   const groupedTargets = useMemo<GroupedTargets[]>(() => {
     const byYear = new Map<number, Map<number, WeekTarget[]>>();
@@ -64,12 +126,15 @@ const WeeklyReport = () => {
   const targetDate = useMemo(() => addWeeks(startOfPlannerWeek(new Date(selectedTarget.year, 0, 1)), selectedTarget.weekNumber - 1), [selectedTarget]);
   const start = startOfPlannerWeek(targetDate);
   const end = endOfPlannerWeek(targetDate);
+  const selectedQuarterKey = toQuarterKey(selectedTarget.year, getQuarter(start));
   const report = weeklyReports.find((item) => item.weekNumber === selectedTarget.weekNumber && item.year === selectedTarget.year);
   const currentPlan = weeklyPlans.find((plan) => plan.weekNumber === selectedTarget.weekNumber && plan.year === selectedTarget.year);
 
   useEffect(() => {
-    setExpandedQuarters((current) => ({ ...current, [toQuarterKey(selectedTarget.year, getQuarter(start))]: true }));
-  }, [selectedTarget, start]);
+    setExpandedQuarters((current) => (
+      current[selectedQuarterKey] ? current : { ...current, [selectedQuarterKey]: true }
+    ));
+  }, [selectedQuarterKey]);
 
   useEffect(() => {
     setDraft(report ? { summary: report.summary, wins: report.wins, blockers: report.blockers, adjustments: report.adjustments } : emptyDraft);
@@ -102,6 +167,12 @@ const WeeklyReport = () => {
   const pomodoroDates = Object.entries(pomodoroHistory).filter(([date]) => date >= dateStart && date <= dateEnd);
   const pomodoroMinutes = pomodoroDates.reduce((sum, [, item]) => sum + item.minutes, 0);
   const pomodoroSessions = pomodoroDates.reduce((sum, [, item]) => sum + item.sessions, 0);
+  const draftHasContent = Object.values(draft).some((value) => value.trim().length > 0);
+  const reportPanels: Array<{ id: ReportPanel; label: string; count?: number }> = [
+    { id: 'overview', label: panelCopy.overview },
+    { id: 'completed', label: panelCopy.completed, count: completedTasks.length },
+    { id: 'write', label: panelCopy.write },
+  ];
 
   const ensureReport = () => {
     if (report) return report;
@@ -160,7 +231,65 @@ const WeeklyReport = () => {
           </div>
         </section>
 
-        <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+        <section className="sticky top-0 z-10 rounded-[24px] border border-slate-200 bg-white/95 p-2 shadow-sm backdrop-blur">
+          <div className="flex flex-wrap gap-2">
+            {reportPanels.map((panel) => (
+              <button
+                key={panel.id}
+                type="button"
+                data-testid={`weekly-report-panel-${panel.id}`}
+                onClick={() => setActivePanel(panel.id)}
+                className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
+                  activePanel === panel.id ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                {panel.label}
+                {typeof panel.count === 'number' ? (
+                  <span className={`ml-2 rounded-full px-2 py-0.5 text-xs ${activePanel === panel.id ? 'bg-white/15 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                    {panel.count}
+                  </span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {activePanel === 'overview' ? (
+        <section data-testid="weekly-report-overview" className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2 text-lg font-black text-slate-900">
+                <BarChart3 size={18} className="text-primary" />
+                {panelCopy.overviewTitle}
+              </div>
+              <p className="mt-2 text-sm text-slate-500">{panelCopy.overviewDesc}</p>
+            </div>
+            <div className={`rounded-2xl px-4 py-3 text-sm font-semibold ${draftHasContent ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-50 text-slate-500'}`}>
+              {draftHasContent ? panelCopy.hasDraft : panelCopy.noDraft}
+            </div>
+          </div>
+          <div className="mt-5 grid gap-4 md:grid-cols-3">
+            <div className="rounded-[22px] bg-slate-50 p-4">
+              <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{panelCopy.quickRead}</div>
+              <div className="mt-2 text-sm font-semibold text-slate-800">{t('weeklyReport.doneTasks', { count: completedTasks.length })}</div>
+              <div className="mt-1 text-xs text-slate-500">{weekTasks.length ? `${completionRate}%` : t('weeklyReport.completedTasks.empty')}</div>
+            </div>
+            <div className="rounded-[22px] bg-slate-50 p-4">
+              <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{t('weeklyReport.focusTime')}</div>
+              <div className="mt-2 text-sm font-semibold text-slate-800">{copy.focusMinutes(pomodoroMinutes)}</div>
+              <div className="mt-1 text-xs text-slate-500">{copy.focusSessions(pomodoroSessions)}</div>
+            </div>
+            <div className="rounded-[22px] bg-slate-50 p-4">
+              <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{panelCopy.planState}</div>
+              <div className="mt-2 text-sm font-semibold text-slate-800">{t('weeklyReport.doneGoals', { count: currentPlan?.goals.filter((goal) => goal.isCompleted).length || 0 })}</div>
+              <div className="mt-1 text-xs text-slate-500">{t('weeklyReport.goalCount')}: {currentPlan?.goals.length || 0}</div>
+            </div>
+          </div>
+        </section>
+        ) : null}
+
+        {activePanel === 'completed' ? (
+        <section data-testid="weekly-report-completed-tasks" className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="flex items-center gap-2 text-lg font-black text-slate-900">
@@ -175,7 +304,7 @@ const WeeklyReport = () => {
             </div>
           </div>
 
-          <div className="mt-4 space-y-3">
+          <div className="mt-4 max-h-[560px] space-y-3 overflow-y-auto pr-1">
             {completedTasks.length === 0 && (
               <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">
                 {t('weeklyReport.completedTasks.empty')}
@@ -209,7 +338,9 @@ const WeeklyReport = () => {
             ))}
           </div>
         </section>
+        ) : null}
 
+        {activePanel === 'write' ? (
         <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-lg font-black text-slate-900"><FileText size={18} className="text-primary" />{t('weeklyReport.body')}</div>
@@ -239,6 +370,7 @@ const WeeklyReport = () => {
             </div>
           </div>
         </section>
+        ) : null}
       </div>
 
       <aside className="space-y-6">

@@ -1,5 +1,6 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '../components/ui/button';
+import { useI18n } from '../i18n';
 
 type FeedbackOptions = {
   message: string;
@@ -18,6 +19,7 @@ type FeedbackContextValue = {
 const FeedbackContext = createContext<FeedbackContextValue | undefined>(undefined);
 
 export const FeedbackProvider = ({ children }: { children: ReactNode }) => {
+  const { locale } = useI18n();
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
   const idRef = useRef(0);
 
@@ -41,7 +43,7 @@ export const FeedbackProvider = ({ children }: { children: ReactNode }) => {
       {children}
       {feedback ? (
         <div className="pointer-events-none fixed bottom-5 left-1/2 z-[80] w-full max-w-[520px] -translate-x-1/2 px-4">
-          <div className="pointer-events-auto flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white/95 px-4 py-3 shadow-lg shadow-slate-900/10 backdrop-blur">
+          <div data-feedback-toast className="pointer-events-auto flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white/95 px-4 py-3 shadow-lg shadow-slate-900/10 backdrop-blur">
             <div className="text-sm font-medium text-slate-700">{feedback.message}</div>
             <div className="flex items-center gap-2">
               {feedback.onUndo ? (
@@ -57,7 +59,7 @@ export const FeedbackProvider = ({ children }: { children: ReactNode }) => {
                 </Button>
               ) : null}
               <Button variant="ghost" className="h-9 rounded-2xl px-3 text-slate-500" onClick={dismiss}>
-                OK
+                {locale === 'zh-CN' ? '知道了' : locale === 'de' ? 'OK' : 'OK'}
               </Button>
             </div>
           </div>

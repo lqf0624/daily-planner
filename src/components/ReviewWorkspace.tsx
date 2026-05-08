@@ -8,26 +8,18 @@ import { useI18n } from '../i18n';
 import { applyActionPreview } from '../services/aiActions';
 import { useAppStore } from '../stores/useAppStore';
 import { Task } from '../types';
-import { getPlanningState } from '../utils/taskActivity';
+import { getPlanningState, getTaskReviewDate } from '../utils/taskActivity';
 import AIAssistant from './AIAssistant';
 import QuarterlyGoals from './QuarterlyGoals';
 import WeeklyPlan from './WeeklyPlan';
 import WeeklyReport from './WeeklyReport';
 import WorkflowSuggestionCard from './WorkflowSuggestionCard';
 import { Button } from './ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-
-const fallbackReviewDate = (task: { plannedForDate?: string; scheduledStart?: string; dueAt?: string; updatedAt: string }) => (
-  task.plannedForDate
-  || task.scheduledStart?.slice(0, 10)
-  || task.dueAt?.slice(0, 10)
-  || task.updatedAt.slice(0, 10)
-);
 
 const getPendingReviewDate = (task: Task) => {
   if (task.status !== 'todo') return undefined;
   if (getPlanningState(task) !== 'today') return undefined;
-  return fallbackReviewDate(task);
+  return getTaskReviewDate(task);
 };
 
 const nowIso = () => new Date().toISOString();
@@ -65,6 +57,7 @@ const ReviewWorkspace = () => {
   const today = format(new Date(), 'yyyy-MM-dd');
   const [selectedReviewDate, setSelectedReviewDate] = useState(today);
   const [reviewAssistantMode, setReviewAssistantMode] = useState<'shutdown' | 'nextWeek'>('shutdown');
+  const [reviewSection, setReviewSection] = useState<'daily' | 'weekly' | 'plan' | 'goals' | 'chat'>('daily');
 
   useEffect(() => {
     rememberReviewDate(selectedReviewDate);
@@ -84,7 +77,7 @@ const ReviewWorkspace = () => {
         pendingCount: tasks.filter((task) => (
           task.status === 'todo'
           && getPlanningState(task) === 'today'
-          && fallbackReviewDate(task) === date
+          && getTaskReviewDate(task) === date
         )).length,
       })),
     [reviewHistoryDates, tasks, today],
@@ -93,7 +86,7 @@ const ReviewWorkspace = () => {
     () => tasks.filter((task) => (
       task.status === 'todo'
       && getPlanningState(task) === 'today'
-      && fallbackReviewDate(task) === selectedReviewDate
+      && getTaskReviewDate(task) === selectedReviewDate
     )),
     [selectedReviewDate, tasks],
   );
@@ -106,6 +99,13 @@ const ReviewWorkspace = () => {
     () => getDateScopedReviewLabels(reviewStateCopy, selectedReviewDate, today, copy.completedToday, copy.needShutdown),
     [copy.completedToday, copy.needShutdown, reviewStateCopy, selectedReviewDate, today],
   );
+  const reviewSections = [
+    { id: 'daily' as const, label: copy.shutdownTitle, count: dailyCommitments.length },
+    { id: 'weekly' as const, label: copy.weeklyReview },
+    { id: 'plan' as const, label: copy.weeklyPlan },
+    { id: 'goals' as const, label: copy.quarterlyGoals },
+    { id: 'chat' as const, label: copy.advancedAI },
+  ];
 
   const completeTask = (task: Task) => {
     const previous = { status: task.status, completedAt: task.completedAt };
@@ -143,9 +143,10 @@ const ReviewWorkspace = () => {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">{copy.eyebrow}</p>
-      message: reviewStateCopy.feedback.dropped(task.title),
-      undoLabel: reviewStateCopy.undo,
+            <h2 className="mt-2 text-3xl font-black tracking-tight text-slate-900">{copy.title}</h2>
+            <p className="mt-2 text-sm text-slate-500">{copy.description}</p>
           </div>
+          {reviewSection === 'daily' ? (
           <div className="grid min-w-[260px] grid-cols-2 gap-3">
             <div className="rounded-2xl bg-slate-50 p-4">
               <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{completedLabel}</div>
@@ -156,17 +157,61 @@ const ReviewWorkspace = () => {
               <div className="mt-2 text-2xl font-black text-slate-900">{dailyCommitments.length}</div>
             </div>
           </div>
+          ) : null}
         </div>
       </section>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.55fr)_340px]">
+      <section className="sticky top-0 z-20 rounded-[24px] border border-slate-200 bg-white/95 p-2 shadow-sm backdrop-blur">
+        <div className="flex flex-wrap gap-2">
+          {reviewSections.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              data-testid={`review-section-${item.id}`}
+              onClick={() => setReviewSection(item.id)}
+              className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
+                reviewSection === item.id ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              {item.label}
+              {typeof item.count === 'number' ? (
+                <span className={`ml-2 rounded-full px-2 py-0.5 text-xs ${reviewSection === item.id ? 'bg-white/15 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                  {item.count}
+                </span>
+              ) : null}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <div className={reviewSection === 'daily' ? 'grid gap-6 xl:grid-cols-[minmax(0,1.55fr)_340px]' : 'block'}>
         <div className="space-y-6">
-          <section className="rounded-[32px] border border-rose-200/80 bg-[radial-gradient(circle_at_top_left,_rgba(244,114,182,0.16),_transparent_40%),linear-gradient(180deg,_rgba(255,241,242,0.96),_rgba(255,255,255,1))] p-6 shadow-sm">
+          {reviewSection === 'daily' ? (
+          <section data-testid="review-daily-shutdown" className="rounded-[32px] border border-rose-200/80 bg-[radial-gradient(circle_at_top_left,_rgba(244,114,182,0.16),_transparent_40%),linear-gradient(180deg,_rgba(255,241,242,0.96),_rgba(255,255,255,1))] p-6 shadow-sm">
             <div className="mb-4 flex items-center gap-2 text-lg font-black text-slate-900">
               <BookCheck size={18} className="text-rose-600" />
               {copy.shutdownTitle}
             </div>
             <p className="text-sm text-slate-600">{copy.shutdownDescription}</p>
+            <div data-testid="review-completed-list" className="mt-4 rounded-[24px] border border-white/80 bg-white/70 p-4 backdrop-blur">
+              <div className="flex items-center justify-between gap-3">
+                <div className="font-semibold text-slate-900">{reviewStateCopy.labels.completedListTitle}</div>
+                <div className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                  {completedForDate.length}
+                </div>
+              </div>
+              <div className="mt-3 space-y-2">
+                {completedForDate.length === 0 ? (
+                  <div className="text-sm text-slate-500">{reviewStateCopy.labels.completedListEmpty}</div>
+                ) : null}
+                {completedForDate.map((task) => (
+                  <div key={task.id} className="flex items-center justify-between gap-3 rounded-2xl bg-emerald-50/80 px-3 py-2">
+                    <div className="font-medium text-slate-800">{task.title}</div>
+                    <div className="text-xs font-semibold text-emerald-700">{copy.done}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
             <div className="mt-4 space-y-3">
               {dailyCommitments.length === 0 ? (
                 <div className="rounded-2xl bg-white/80 p-4 text-sm text-slate-500">{copy.shutdownEmpty}</div>
@@ -212,31 +257,19 @@ const ReviewWorkspace = () => {
               ))}
             </div>
           </section>
+          ) : null}
 
-          <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
-            <Tabs defaultValue="weekly">
-              <TabsList className="h-auto rounded-2xl bg-slate-100 p-1">
-                <TabsTrigger value="weekly" className="rounded-2xl">{copy.weeklyReview}</TabsTrigger>
-                <TabsTrigger value="plan" className="rounded-2xl">{copy.weeklyPlan}</TabsTrigger>
-                <TabsTrigger value="goals" className="rounded-2xl">{copy.quarterlyGoals}</TabsTrigger>
-                <TabsTrigger value="chat" className="rounded-2xl">{copy.advancedAI}</TabsTrigger>
-              </TabsList>
-              <TabsContent value="weekly" className="mt-4">
-                <WeeklyReport />
-              </TabsContent>
-              <TabsContent value="plan" className="mt-4">
-                <WeeklyPlan />
-              </TabsContent>
-              <TabsContent value="goals" className="mt-4">
-                <QuarterlyGoals />
-              </TabsContent>
-              <TabsContent value="chat" className="mt-4">
-                <AIAssistant />
-              </TabsContent>
-            </Tabs>
+          {reviewSection !== 'daily' ? (
+          <section className="rounded-[28px] border border-transparent bg-transparent p-0">
+            {reviewSection === 'weekly' ? <WeeklyReport /> : null}
+            {reviewSection === 'plan' ? <WeeklyPlan /> : null}
+            {reviewSection === 'goals' ? <QuarterlyGoals /> : null}
+            {reviewSection === 'chat' ? <AIAssistant /> : null}
           </section>
+          ) : null}
         </div>
 
+        {reviewSection === 'daily' ? (
         <aside className="space-y-6">
           <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex items-center gap-2 text-sm font-black text-slate-900">
@@ -338,6 +371,7 @@ const ReviewWorkspace = () => {
             </div>
           </section>
         </aside>
+        ) : null}
       </div>
     </div>
   );
