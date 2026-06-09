@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { addWeeks, getQuarter, parseISO, subWeeks } from 'date-fns';
-import { BarChart3, CheckCircle2, ChevronDown, Clock3, FileText, History, Save } from 'lucide-react';
+import { BarChart3, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Clock3, FileText, History, Save } from 'lucide-react';
 import { getReviewPanelsCopy } from '../content/reviewPanelsCopy';
 import { useI18n } from '../i18n';
 import { useAppStore } from '../stores/useAppStore';
@@ -12,12 +12,29 @@ import { Button } from './ui/button';
 type WeeklyReportDraft = Pick<WeeklyReportType, 'summary' | 'wins' | 'blockers' | 'adjustments'>;
 type WeekTarget = { weekNumber: number; year: number };
 type GroupedTargets = { year: number; quarters: Array<{ quarter: number; targets: WeekTarget[] }> };
-type ReportPanel = 'overview' | 'completed' | 'write';
+type ReportPanel = 'overview' | 'review' | 'completed' | 'write';
 
 const emptyDraft: WeeklyReportDraft = { summary: '', wins: '', blockers: '', adjustments: '' };
 const toTargetKey = ({ weekNumber, year }: WeekTarget) => `${year}-W${weekNumber}`;
 const toQuarterKey = (year: number, quarter: number) => `${year}-Q${quarter}`;
 const hasPlanningDate = (scheduledStart?: string, dueAt?: string) => Boolean(scheduledStart || dueAt);
+const weeksInPlannerYear = (year: number) => {
+  let cursor = new Date(year, 11, 31);
+  while (getPlannerWeekYear(cursor) !== year) {
+    cursor = addWeeks(cursor, -1);
+  }
+  return getPlannerWeek(cursor);
+};
+
+const buildFullYearTargets = (year: number): WeekTarget[] => Array.from(
+  { length: weeksInPlannerYear(year) },
+  (_, index) => ({ year, weekNumber: index + 1 }),
+);
+
+const getTargetQuarter = (target: WeekTarget) => {
+  const dateInsideTargetYear = addWeeks(new Date(target.year, 0, 1), target.weekNumber - 1);
+  return getQuarter(dateInsideTargetYear);
+};
 
 const getPanelCopy = (locale: string) => {
   if (locale === 'zh-CN') {
@@ -26,6 +43,11 @@ const getPanelCopy = (locale: string) => {
       overviewTitle: '\u672c\u5468\u6982\u89c8',
       overviewDesc: '\u5148\u770b\u7ed3\u679c\uff0c\u518d\u51b3\u5b9a\u8981\u4e0d\u8981\u8fdb\u5165\u5b8c\u6210\u9879\u6216\u5199\u590d\u76d8\u3002',
       completed: '\u5b8c\u6210\u9879',
+      review: '\u67e5\u770b\u590d\u76d8',
+      reviewTitle: '\u590d\u76d8\u5185\u5bb9',
+      reviewDesc: '\u8fd9\u91cc\u76f4\u63a5\u5c55\u793a\u5df2\u4fdd\u5b58\u7684\u672c\u5468\u590d\u76d8\uff0c\u7f16\u8f91\u65f6\u518d\u8fdb\u5165\u5199\u590d\u76d8\u3002',
+      editReview: '\u7f16\u8f91\u590d\u76d8',
+      emptyReview: '\u8fd9\u4e00\u5468\u8fd8\u6ca1\u6709\u4fdd\u5b58\u590d\u76d8\u5185\u5bb9\u3002',
       write: '\u5199\u590d\u76d8',
       quickRead: '\u5feb\u901f\u5224\u65ad',
       planState: '\u5468\u8ba1\u5212',
@@ -40,6 +62,11 @@ const getPanelCopy = (locale: string) => {
       overviewTitle: 'Wochenüberblick',
       overviewDesc: 'Erst Ergebnis prüfen, dann bei Bedarf Aufgaben oder Text öffnen.',
       completed: 'Erledigt',
+      review: 'Review lesen',
+      reviewTitle: 'Review-Inhalt',
+      reviewDesc: 'Gespeicherter Wochenrueckblick. Zum Aendern den Schreibmodus oeffnen.',
+      editReview: 'Review bearbeiten',
+      emptyReview: 'Fuer diese Woche ist noch kein Review gespeichert.',
       write: 'Schreiben',
       quickRead: 'Schnellcheck',
       planState: 'Wochenplan',
@@ -53,6 +80,11 @@ const getPanelCopy = (locale: string) => {
     overviewTitle: 'Week overview',
     overviewDesc: 'Check the outcome first, then open completed tasks or the writing form only when needed.',
     completed: 'Done',
+    review: 'Review',
+    reviewTitle: 'Review content',
+    reviewDesc: 'Read the saved weekly review here. Open write mode only when you want to edit it.',
+    editReview: 'Edit review',
+    emptyReview: 'No review content has been saved for this week yet.',
     write: 'Write',
     quickRead: 'Quick read',
     planState: 'Weekly plan',
@@ -82,18 +114,27 @@ const WeeklyReport = () => {
   const availableTargets = useMemo(() => {
     const map = new Map<string, WeekTarget>();
     const currentTarget = { weekNumber: getPlannerWeek(new Date()), year: getPlannerWeekYear(new Date()) };
+    const years = new Set<number>([currentTarget.year, defaultTarget.year, selectedTarget.year]);
     const addTargetForDate = (value?: string) => {
       if (!value) return;
       const parsed = parseISO(value);
       if (!Number.isFinite(parsed.getTime())) return;
       const target = { weekNumber: getPlannerWeek(parsed), year: getPlannerWeekYear(parsed) };
+      years.add(target.year);
       map.set(toTargetKey(target), target);
     };
 
     map.set(toTargetKey(defaultTarget), defaultTarget);
     map.set(toTargetKey(currentTarget), currentTarget);
-    weeklyReports.forEach((report) => map.set(toTargetKey(report), { weekNumber: report.weekNumber, year: report.year }));
-    weeklyPlans.forEach((plan) => map.set(toTargetKey(plan), { weekNumber: plan.weekNumber, year: plan.year }));
+    map.set(toTargetKey(selectedTarget), selectedTarget);
+    weeklyReports.forEach((report) => {
+      years.add(report.year);
+      map.set(toTargetKey(report), { weekNumber: report.weekNumber, year: report.year });
+    });
+    weeklyPlans.forEach((plan) => {
+      years.add(plan.year);
+      map.set(toTargetKey(plan), { weekNumber: plan.weekNumber, year: plan.year });
+    });
     tasks.forEach((task) => {
       addTargetForDate(task.completedAt);
       addTargetForDate(task.scheduledStart);
@@ -101,14 +142,16 @@ const WeeklyReport = () => {
       addTargetForDate(task.plannedForDate);
       addTargetForDate(task.createdAt);
     });
+    Array.from(years).forEach((year) => {
+      buildFullYearTargets(year).forEach((target) => map.set(toTargetKey(target), target));
+    });
     return Array.from(map.values()).sort((a, b) => (b.year - a.year) || (b.weekNumber - a.weekNumber));
-  }, [defaultTarget, tasks, weeklyPlans, weeklyReports]);
+  }, [defaultTarget, selectedTarget, tasks, weeklyPlans, weeklyReports]);
 
   const groupedTargets = useMemo<GroupedTargets[]>(() => {
     const byYear = new Map<number, Map<number, WeekTarget[]>>();
     availableTargets.forEach((target) => {
-      const weekStart = addWeeks(startOfPlannerWeek(new Date(target.year, 0, 1)), target.weekNumber - 1);
-      const quarter = getQuarter(weekStart);
+      const quarter = getTargetQuarter(target);
       const yearMap = byYear.get(target.year) || new Map<number, WeekTarget[]>();
       yearMap.set(quarter, [...(yearMap.get(quarter) || []), target]);
       byYear.set(target.year, yearMap);
@@ -126,7 +169,7 @@ const WeeklyReport = () => {
   const targetDate = useMemo(() => addWeeks(startOfPlannerWeek(new Date(selectedTarget.year, 0, 1)), selectedTarget.weekNumber - 1), [selectedTarget]);
   const start = startOfPlannerWeek(targetDate);
   const end = endOfPlannerWeek(targetDate);
-  const selectedQuarterKey = toQuarterKey(selectedTarget.year, getQuarter(start));
+  const selectedQuarterKey = toQuarterKey(selectedTarget.year, getTargetQuarter(selectedTarget));
   const report = weeklyReports.find((item) => item.weekNumber === selectedTarget.weekNumber && item.year === selectedTarget.year);
   const currentPlan = weeklyPlans.find((plan) => plan.weekNumber === selectedTarget.weekNumber && plan.year === selectedTarget.year);
 
@@ -170,9 +213,32 @@ const WeeklyReport = () => {
   const draftHasContent = Object.values(draft).some((value) => value.trim().length > 0);
   const reportPanels: Array<{ id: ReportPanel; label: string; count?: number }> = [
     { id: 'overview', label: panelCopy.overview },
+    { id: 'review', label: panelCopy.review },
     { id: 'completed', label: panelCopy.completed, count: completedTasks.length },
     { id: 'write', label: panelCopy.write },
   ];
+  const reviewBlocks = [
+    { key: 'summary', label: t('weeklyReport.summary'), value: draft.summary },
+    { key: 'wins', label: t('weeklyReport.wins'), value: draft.wins },
+    { key: 'blockers', label: t('weeklyReport.blockers'), value: draft.blockers },
+    { key: 'adjustments', label: t('weeklyReport.adjustments'), value: draft.adjustments },
+  ].filter((item) => item.value.trim().length > 0);
+
+  const showAdjacentWeek = (offset: number) => {
+    const nextDate = addWeeks(targetDate, offset);
+    setSelectedTarget({
+      weekNumber: getPlannerWeek(nextDate),
+      year: getPlannerWeekYear(nextDate),
+    });
+  };
+
+  const showCurrentWeek = () => {
+    const now = new Date();
+    setSelectedTarget({
+      weekNumber: getPlannerWeek(now),
+      year: getPlannerWeekYear(now),
+    });
+  };
 
   const ensureReport = () => {
     if (report) return report;
@@ -202,15 +268,30 @@ const WeeklyReport = () => {
     <div className="grid h-full gap-6 xl:grid-cols-[minmax(0,1.3fr)_320px]">
       <div className="space-y-6">
         <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">{t('weeklyReport.title')}</p>
-          <h2 className="mt-2 text-3xl font-black tracking-tight text-slate-900">
-            {t('weeklyReport.heading', {
-              week: selectedTarget.weekNumber,
-              start: formatDate(start, { month: 'numeric', day: 'numeric' }),
-              end: formatDate(end, { month: 'numeric', day: 'numeric' }),
-            })}
-          </h2>
-          <p className="mt-2 text-sm text-slate-500">{t('weeklyReport.desc')}</p>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">{t('weeklyReport.title')}</p>
+              <h2 className="mt-2 text-3xl font-black tracking-tight text-slate-900">
+                {t('weeklyReport.heading', {
+                  week: selectedTarget.weekNumber,
+                  start: formatDate(start, { month: 'numeric', day: 'numeric' }),
+                  end: formatDate(end, { month: 'numeric', day: 'numeric' }),
+                })}
+              </h2>
+              <p className="mt-2 text-sm text-slate-500">{t('weeklyReport.desc')}</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button data-testid="weekly-report-prev" variant="outline" className="rounded-2xl" onClick={() => showAdjacentWeek(-1)}>
+                <ChevronLeft size={16} />
+              </Button>
+              <Button data-testid="weekly-report-current" variant="outline" className="rounded-2xl" onClick={showCurrentWeek}>
+                {t('weeklyPlan.backToCurrent')}
+              </Button>
+              <Button data-testid="weekly-report-next" variant="outline" className="rounded-2xl" onClick={() => showAdjacentWeek(1)}>
+                <ChevronRight size={16} />
+              </Button>
+            </div>
+          </div>
         </section>
 
         <section className="grid gap-4 md:grid-cols-3">
@@ -285,6 +366,38 @@ const WeeklyReport = () => {
               <div className="mt-1 text-xs text-slate-500">{t('weeklyReport.goalCount')}: {currentPlan?.goals.length || 0}</div>
             </div>
           </div>
+        </section>
+        ) : null}
+
+        {activePanel === 'review' ? (
+        <section data-testid="weekly-report-review-content" className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2 text-lg font-black text-slate-900">
+                <FileText size={18} className="text-primary" />
+                {panelCopy.reviewTitle}
+              </div>
+              <p className="mt-2 text-sm text-slate-500">{panelCopy.reviewDesc}</p>
+            </div>
+            <Button data-testid="weekly-report-edit-review" variant="outline" className="rounded-2xl" onClick={() => setActivePanel('write')}>
+              {draftHasContent ? panelCopy.editReview : panelCopy.write}
+            </Button>
+          </div>
+
+          {reviewBlocks.length ? (
+            <div className="mt-5 grid gap-4">
+              {reviewBlocks.map((block) => (
+                <div key={block.key} className="rounded-[22px] border border-slate-200 bg-slate-50/80 p-4">
+                  <div className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">{block.label}</div>
+                  <div className="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-700">{block.value}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">
+              {panelCopy.emptyReview}
+            </div>
+          )}
         </section>
         ) : null}
 

@@ -6,6 +6,7 @@ import { applyActionPreview } from '../services/aiActions';
 import { useAppStore } from '../stores/useAppStore';
 import { Task } from '../types';
 import { isInboxTask, isLaterTask } from '../utils/taskActivity';
+import TaskGoalLinks from './TaskGoalLinks';
 import WorkflowSuggestionCard from './WorkflowSuggestionCard';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -92,7 +93,10 @@ const InboxWorkspace = () => {
     addTask,
     updateTask,
     setTaskPlanningState,
+    syncTaskRelations,
   } = useAppStore();
+  const goals = useAppStore((state) => state.goals);
+  const weeklyPlans = useAppStore((state) => state.weeklyPlans);
   const [draft, setDraft] = useState('');
   const [pendingEdits, setPendingEdits] = useState<Record<string, InboxDraft>>({});
   const [expandedNotes, setExpandedNotes] = useState<Record<string, boolean>>({});
@@ -178,6 +182,11 @@ const InboxWorkspace = () => {
 
   const toggleNotes = (taskId: string) => {
     setExpandedNotes((current) => ({ ...current, [taskId]: !current[taskId] }));
+  };
+
+  const updateGoalLinks = (task: Task, linkedGoalIds: string[], linkedWeeklyGoalIds: string[]) => {
+    updateTask(task.id, { linkedGoalIds, linkedWeeklyGoalIds });
+    syncTaskRelations(task.id, linkedGoalIds, linkedWeeklyGoalIds);
   };
 
   return (
@@ -369,6 +378,13 @@ const InboxWorkspace = () => {
                         placeholder={copy.inbox.notesPlaceholder}
                       />
                     ) : null}
+                    <TaskGoalLinks
+                      task={task}
+                      goals={goals}
+                      weeklyPlans={weeklyPlans}
+                      onChange={(linkedGoalIds, linkedWeeklyGoalIds) => updateGoalLinks(task, linkedGoalIds, linkedWeeklyGoalIds)}
+                      compact
+                    />
                   </div>
                   <div className="flex min-w-[180px] flex-col items-end gap-3">
                     <div className="flex flex-wrap items-center justify-end gap-2 text-xs">

@@ -15,6 +15,7 @@ import { readFloatingMode, readFloatingSize } from '../utils/floatingWindow';
 import { buildFocusSessionBrief, getFocusRhythmPreset, getRecommendedFocusRhythm } from '../utils/focusRhythm';
 import { isTauriRuntime } from '../utils/runtime';
 import { getPlanningState, getTaskDateLabel, isLaterTask, isTodayTask } from '../utils/taskActivity';
+import TaskGoalLinks from './TaskGoalLinks';
 import WorkflowSuggestionCard from './WorkflowSuggestionCard';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
@@ -203,8 +204,11 @@ const TaskChip = ({
   actionModel,
   copy,
   scheduleCopy,
+  goals,
+  weeklyPlans,
   onQuickSchedule,
   onCustomSchedule,
+  onGoalLinksChange,
   moreLabel,
   tone = 'default',
 }: {
@@ -212,8 +216,11 @@ const TaskChip = ({
   actionModel: TaskActionModel;
   copy: ReturnType<typeof getWorkflowCopy>['today'];
   scheduleCopy: ReturnType<typeof getScheduleCopy>;
+  goals: ReturnType<typeof useAppStore.getState>['goals'];
+  weeklyPlans: ReturnType<typeof useAppStore.getState>['weeklyPlans'];
   onQuickSchedule: (task: Task, slot: QuickScheduleSlot) => void;
   onCustomSchedule: (task: Task) => void;
+  onGoalLinksChange: (task: Task, linkedGoalIds: string[], linkedWeeklyGoalIds: string[]) => void;
   moreLabel: string;
   tone?: 'default' | 'muted';
 }) => {
@@ -299,6 +306,13 @@ const TaskChip = ({
           {scheduleCopy.custom}
         </button>
       </div>
+      <TaskGoalLinks
+        task={task}
+        goals={goals}
+        weeklyPlans={weeklyPlans}
+        onChange={(linkedGoalIds, linkedWeeklyGoalIds) => onGoalLinksChange(task, linkedGoalIds, linkedWeeklyGoalIds)}
+        compact
+      />
     </div>
   );
 };
@@ -314,6 +328,7 @@ const TodayWorkspace = () => {
   const todayStateCopy = getTodayStateCopy(locale);
   const tasks = useAppStore((state) => state.tasks);
   const goals = useAppStore((state) => state.goals);
+  const weeklyPlans = useAppStore((state) => state.weeklyPlans);
   const currentTaskId = useAppStore((state) => state.currentTaskId);
   const setCurrentTaskId = useAppStore((state) => state.setCurrentTaskId);
   const promoteTaskToHighlight = useAppStore((state) => state.promoteTaskToHighlight);
@@ -321,6 +336,7 @@ const TodayWorkspace = () => {
   const setTaskPlanningState = useAppStore((state) => state.setTaskPlanningState);
   const updateTask = useAppStore((state) => state.updateTask);
   const deleteTask = useAppStore((state) => state.deleteTask);
+  const syncTaskRelations = useAppStore((state) => state.syncTaskRelations);
   const { timeLeft, isActive, mode, pomodoroSettings, updatePomodoroSettings, toggleTimer, resetTimer, currentTaskName } = usePomodoro();
   const { showFeedback } = useFeedback();
   const [view, setView] = useState<'plan' | 'calendar'>('plan');
@@ -521,6 +537,18 @@ const TodayWorkspace = () => {
       message: locale === 'zh-CN' ? `\u5df2\u5b89\u6392\uff1a${scheduleTask.title}` : locale === 'de' ? `Geplant: ${scheduleTask.title}` : `Scheduled: ${scheduleTask.title}`,
     });
     setScheduleTask(null);
+  };
+
+  const updateGoalLinks = (task: Task, linkedGoalIds: string[], linkedWeeklyGoalIds: string[]) => {
+    updateTask(task.id, { linkedGoalIds, linkedWeeklyGoalIds });
+    syncTaskRelations(task.id, linkedGoalIds, linkedWeeklyGoalIds);
+    showFeedback({
+      message: locale === 'zh-CN'
+        ? `\u5df2\u66f4\u65b0\u76ee\u6807\u5173\u8054\uff1a${task.title}`
+        : locale === 'de'
+          ? `Zielverknuepfung aktualisiert: ${task.title}`
+          : `Updated goal links: ${task.title}`,
+    });
   };
 
   const buildFocusAction = (taskId: string): TaskAction => {
@@ -817,6 +845,13 @@ const TodayWorkspace = () => {
                   className="mt-4 min-h-[96px] w-full rounded-2xl border border-slate-200 bg-white p-3 text-sm outline-none"
                   placeholder={copy.highlightNotesPlaceholder}
                 />
+                <TaskGoalLinks
+                  task={highlightTask}
+                  goals={goals}
+                  weeklyPlans={weeklyPlans}
+                  onChange={(linkedGoalIds, linkedWeeklyGoalIds) => updateGoalLinks(highlightTask, linkedGoalIds, linkedWeeklyGoalIds)}
+                  compact
+                />
                 <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-emerald-100 pt-4">
                   <span className="text-xs font-semibold text-emerald-700">{scheduleCopy.quickTitle}</span>
                   {quickScheduleSlots.map((slot) => (
@@ -861,8 +896,11 @@ const TodayWorkspace = () => {
                   task={task}
                   copy={copy}
                   scheduleCopy={scheduleCopy}
+                  goals={goals}
+                  weeklyPlans={weeklyPlans}
                   onQuickSchedule={quickScheduleTask}
                   onCustomSchedule={openScheduleDialog}
+                  onGoalLinksChange={updateGoalLinks}
                   moreLabel={todayStateCopy.menuMore}
                   actionModel={{
                     primary: buildFocusAction(task.id),
@@ -892,8 +930,11 @@ const TodayWorkspace = () => {
                   task={task}
                   copy={copy}
                   scheduleCopy={scheduleCopy}
+                  goals={goals}
+                  weeklyPlans={weeklyPlans}
                   onQuickSchedule={quickScheduleTask}
                   onCustomSchedule={openScheduleDialog}
+                  onGoalLinksChange={updateGoalLinks}
                   moreLabel={todayStateCopy.menuMore}
                   tone="muted"
                   actionModel={{
@@ -925,8 +966,11 @@ const TodayWorkspace = () => {
                   task={task}
                   copy={copy}
                   scheduleCopy={scheduleCopy}
+                  goals={goals}
+                  weeklyPlans={weeklyPlans}
                   onQuickSchedule={quickScheduleTask}
                   onCustomSchedule={openScheduleDialog}
+                  onGoalLinksChange={updateGoalLinks}
                   moreLabel={todayStateCopy.menuMore}
                   tone="muted"
                   actionModel={{
